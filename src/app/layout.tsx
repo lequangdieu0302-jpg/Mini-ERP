@@ -78,15 +78,19 @@ export default function RootLayout({
           <AIChatbot />
         </ERPProvider>
 
-        {/* PWA Service Worker Registration */}
         <Script id="sw-register" strategy="afterInteractive">
           {`
             if ('serviceWorker' in navigator) {
-              window.addEventListener('load', function() {
+              const register = () => {
                 navigator.serviceWorker.register('/sw.js')
                   .then(function(reg) { console.log('SW registered:', reg.scope); })
                   .catch(function(err) { console.log('SW registration failed:', err); });
-              });
+              };
+              if (document.readyState === 'complete') {
+                register();
+              } else {
+                window.addEventListener('load', register);
+              }
             }
           `}
         </Script>
