@@ -8,11 +8,21 @@ const STATIC_ASSETS = [
   '/icon-512.png',
 ];
 
-// Install: cache static assets
+// Install: cache static assets gracefully (don't fail install if some assets redirect or fail)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
+      return Promise.allSettled(
+        STATIC_ASSETS.map((url) =>
+          fetch(url)
+            .then((response) => {
+              if (response.ok) {
+                return cache.put(url, response);
+              }
+            })
+            .catch((err) => console.warn('Failed to cache:', url, err))
+        )
+      );
     })
   );
   self.skipWaiting();
