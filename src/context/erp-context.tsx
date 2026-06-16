@@ -307,11 +307,6 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const { data: usersData } = await supabase.from('users_profile').select('*');
         if (usersData && usersData.length > 0) {
           setUsers(usersData);
-          // Only set default user if currentUser is still empty (no logged-in session)
-          if (!currentUser.id) {
-            const defaultUser = usersData.find(u => u.email === 'admin@apex.com');
-            if (defaultUser) setCurrentUser(defaultUser);
-          }
         }
 
         const { data: userCompaniesData } = await supabase.from('user_companies').select('*');
