@@ -201,27 +201,27 @@ export default function Home() {
               </h2>
 
               {/* Group items grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3">
                 {group.items.map((item) => {
                   const Icon = item.icon;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      className="group relative flex items-center gap-3.5 rounded-xl border border-slate-200/80 bg-white/90 dark:border-zinc-800/80 dark:bg-zinc-900/90 p-3.5 transition-all duration-200 hover:shadow-md hover:border-blue-500 dark:hover:border-blue-500 hover:scale-[1.02] active:scale-[0.98] shadow-sm"
+                      className="group relative flex items-center gap-2.5 sm:gap-3.5 rounded-xl border border-slate-200/80 bg-white/90 dark:border-zinc-800/80 dark:bg-zinc-900/90 p-2.5 sm:p-3.5 transition-all duration-200 hover:shadow-md hover:border-blue-500 dark:hover:border-blue-500 hover:scale-[1.02] active:scale-[0.98] shadow-sm"
                     >
-                      <div className={`h-9.5 w-9.5 rounded-lg flex items-center justify-center shrink-0 ${group.iconBg} shadow-sm`}>
+                      <div className={`h-8.5 w-8.5 sm:h-9.5 sm:w-9.5 rounded-lg flex items-center justify-center shrink-0 ${group.iconBg} shadow-sm`}>
                         <Icon className="h-4.5 w-4.5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-extrabold text-slate-900 dark:text-zinc-100 tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                        <div className="text-[11px] sm:text-xs font-extrabold text-slate-900 dark:text-zinc-100 tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate">
                           {t(item.name)}
                         </div>
-                        <div className="text-[10px] text-slate-500 dark:text-zinc-400 mt-1 leading-snug">
+                        <div className="hidden sm:block text-[10px] text-slate-500 dark:text-zinc-400 mt-1 leading-snug">
                           {t(item.desc)}
                         </div>
                       </div>
-                      <ArrowRight className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-650 opacity-0 group-hover:opacity-100 transition-all shrink-0 translate-x-[-4px] group-hover:translate-x-0" />
+                      <ArrowRight className="hidden sm:block h-3.5 w-3.5 text-slate-400 dark:text-zinc-650 opacity-0 group-hover:opacity-100 transition-all shrink-0 translate-x-[-4px] group-hover:translate-x-0" />
                     </Link>
                   );
                 })}
