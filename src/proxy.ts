@@ -37,9 +37,10 @@ export async function proxy(request: NextRequest) {
   const url = request.nextUrl.clone();
   const isAuthPage = url.pathname.startsWith("/login") || url.pathname.startsWith("/register");
   const isTodosPage = url.pathname.startsWith("/todos");
+  const isStaticPwaAsset = url.pathname === "/manifest.json" || url.pathname === "/sw.js";
 
   // If not logged in and trying to access a protected route
-  if (!user && !isAuthPage && !isTodosPage) {
+  if (!user && !isAuthPage && !isTodosPage && !isStaticPwaAsset) {
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
@@ -60,8 +61,10 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - manifest.json (PWA manifest)
+     * - sw.js (PWA service worker)
      * - Images/icons (svg, png, jpg, etc.)
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest\\.json|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
