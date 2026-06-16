@@ -380,7 +380,7 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fetchSupabaseData();
   }, [supabase, currentUser?.id]);
 
-  // Listen to Auth State Changes
+  // Listen to Auth State Changes and handle app foreground/visibility changes
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
@@ -458,8 +458,29 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
 
+    // Proactively refresh session when app comes to foreground or page is focused
+    // to prevent suspended/expired tokens from failing database queries
+    const handleVisibilityOrFocus = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        try {
+          // getSession() automatically refreshes expired token using refresh token
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            console.log("Supabase session refreshed on focus/visibility change.");
+          }
+        } catch (e) {
+          console.warn("Failed to check/refresh session on focus:", e);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
     return () => {
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
     };
   }, [supabase]);
 
