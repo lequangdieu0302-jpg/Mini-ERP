@@ -694,7 +694,7 @@ export function EmployeePortal() {
             <div className="saas-card p-6 border-2 border-zinc-950 dark:border-white space-y-6 animate-in slide-in-from-bottom duration-200">
               <div className="flex items-center justify-between border-b border-zinc-250 dark:border-zinc-800 pb-4">
                 <div>
-                  <h2 className="text-sm font-black uppercase tracking-widest text-zinc-950 dark:text-white">APEX CONTRACTING & BUILDERS</h2>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-zinc-950 dark:text-white">DIEULE CONTRACTING & BUILDERS</h2>
                   <p className="text-[9px] text-zinc-450 uppercase tracking-widest mt-0.5">Corporate Payslip Ledger</p>
                 </div>
                 <button

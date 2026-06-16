@@ -7,8 +7,8 @@ import Link from 'next/link';
 import { Lock, Mail, User, Loader2, ShieldAlert, Activity, Building2, Briefcase } from 'lucide-react';
 
 const COMPANIES_OPTIONS = [
-  { id: 'c8b671a8-ff69-42b7-a37a-77c86f7881c1', name: 'Công ty Cổ phần Xây dựng Apex' },
-  { id: 'c8b671a8-ff69-42b7-a37a-77c86f7882c2', name: 'Nhà cung cấp Vật liệu Xây dựng Apex' },
+  { id: 'c8b671a8-ff69-42b7-a37a-77c86f7881c1', name: 'Công ty Cổ phần Xây dựng Dieule' },
+  { id: 'c8b671a8-ff69-42b7-a37a-77c86f7882c2', name: 'Nhà cung cấp Vật liệu Xây dựng Dieule' },
   { id: 'c8b671a8-ff69-42b7-a37a-77c86f7883c3', name: 'Tổng công ty Đầu tư & Xây dựng Summit' }
 ];
 

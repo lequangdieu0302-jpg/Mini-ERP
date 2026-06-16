@@ -178,17 +178,17 @@ export default function Navbar() {
     group.items.some(item => pathname.startsWith(item.href));
 
   return (
-    <header ref={navRef} className="sticky top-0 z-40 w-full border-b border-zinc-200/50 bg-white/80 backdrop-blur-xl dark:border-zinc-800/50 dark:bg-zinc-950/80 transition-colors duration-200">
+    <header ref={navRef} className="sticky top-0 z-40 w-full border-b border-slate-850 bg-slate-900 text-slate-100 dark:border-zinc-800/50 dark:bg-zinc-950 transition-colors duration-200 shadow-sm">
       {/* ── Top bar ── */}
       <div className="flex h-12 items-center justify-between px-3 md:px-5">
         {/* Left: Brand */}
         <div className="flex items-center gap-3 shrink-0">
           <Link href="/" className="flex items-center gap-1.5">
-            <div className="h-6 w-6 rounded-md bg-zinc-950 dark:bg-white flex items-center justify-center text-white dark:text-zinc-950 font-black text-sm">
-              A
+            <div className="h-6 w-6 rounded-md bg-blue-600 flex items-center justify-center text-white font-black text-sm">
+              D
             </div>
-            <span className="hidden sm:block text-xs font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-              apex<span className="text-zinc-400 dark:text-zinc-600">.erp</span>
+            <span className="hidden sm:block text-xs font-bold tracking-tight text-white">
+              dieule<span className="text-slate-400 dark:text-zinc-600">.erp</span>
             </span>
           </Link>
         </div>
@@ -205,10 +205,10 @@ export default function Navbar() {
                   onClick={() => setOpenGroup(isOpen ? null : group.label)}
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 cursor-pointer ${
                     active
-                      ? 'text-zinc-900 dark:text-white bg-zinc-100 dark:bg-zinc-800/60'
+                      ? 'text-white bg-slate-800 dark:text-white dark:bg-zinc-800/60'
                       : isOpen
-                        ? 'text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900/40'
-                        : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-900/30'
+                        ? 'text-white bg-slate-800/60 dark:text-zinc-300 dark:bg-zinc-900/40'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-850 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-900/30'
                   }`}
                 >
                   {t(group.label)}
@@ -270,29 +270,29 @@ export default function Navbar() {
           {/* Language */}
           <button 
             onClick={() => setLanguage(language === 'en' ? 'vi' : 'en')}
-            className="flex h-8 px-2 items-center justify-center gap-1 rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 font-medium text-[10px] cursor-pointer"
+            className="flex h-8 px-2 items-center justify-center gap-1 rounded-md text-slate-300 transition hover:bg-slate-800 hover:text-white dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 font-medium text-[10px] cursor-pointer"
           >
-            <Globe className="h-3.5 w-3.5" />
+            <Globe className="h-3.5 w-3.5 text-slate-400" />
             <span className="uppercase">{language}</span>
           </button>
 
           {/* Theme */}
           <button 
             onClick={toggleDarkMode}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 cursor-pointer"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 transition hover:bg-slate-800 hover:text-white dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 cursor-pointer"
           >
-            {darkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
+            {darkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-400" />}
           </button>
 
           {/* Company — hidden mobile */}
           <div className="relative hidden sm:block">
             <button 
               onClick={() => { setCompanyDropdownOpen(!companyDropdownOpen); setRoleDropdownOpen(false); setOpenGroup(null); }}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/80 cursor-pointer"
+              className="flex h-8 items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/40 px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800/80 cursor-pointer"
             >
-              <Building2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+              <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
               <span className="hidden md:inline truncate max-w-[80px]">{activeCompany.name.split(' ')[0]}</span>
-              <ChevronDown className="h-3 w-3 text-zinc-400" />
+              <ChevronDown className="h-3 w-3 text-slate-450" />
             </button>
             {companyDropdownOpen && (
               <div className="absolute right-0 mt-1.5 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-md dark:border-zinc-800 dark:bg-zinc-950 z-50">
@@ -317,11 +317,11 @@ export default function Navbar() {
           <div className="relative">
             <button 
               onClick={() => { setRoleDropdownOpen(!roleDropdownOpen); setCompanyDropdownOpen(false); setOpenGroup(null); }}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50/50 px-2 text-[11px] font-semibold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-900/30 dark:bg-indigo-950/30 dark:text-indigo-400 cursor-pointer"
+              className="flex h-8 items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/40 px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-800 dark:border-indigo-900/30 dark:bg-indigo-950/30 dark:text-indigo-400 cursor-pointer"
             >
               <img src={currentUser.avatar_url || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'} alt="" className="h-5 w-5 rounded-full object-cover shrink-0" />
               <span className="hidden lg:inline max-w-[80px] truncate">{currentUser.full_name.split(' ').pop()}</span>
-              <span className="hidden sm:inline bg-indigo-100 dark:bg-indigo-950 px-1.5 py-0.5 rounded text-[9px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wide">
+              <span className="hidden sm:inline bg-slate-800 dark:bg-indigo-955 px-1.5 py-0.5 rounded text-[9px] text-slate-300 dark:text-indigo-400 font-bold uppercase tracking-wide">
                 {activeRole.replace(' ', '').slice(0, 6)}
               </span>
             </button>
@@ -380,18 +380,18 @@ export default function Navbar() {
           {/* Notifications */}
           <button 
             onClick={() => setNotificationsCount(0)}
-            className="relative flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900 cursor-pointer"
+            className="relative flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-800 hover:text-white dark:text-zinc-400 dark:hover:bg-zinc-900 cursor-pointer"
           >
-            <Bell className="h-4 w-4" />
+            <Bell className="h-4 w-4 text-slate-400" />
             {notificationsCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-indigo-600 ring-2 ring-white dark:ring-zinc-950" />
+              <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-blue-500 ring-2 ring-slate-900 dark:ring-zinc-950" />
             )}
           </button>
         </div>
       </div>
 
-      {/* ── Mobile nav tabs (scrollable horizontal) ── */}
-      <div className="md:hidden flex items-center gap-1 overflow-x-auto px-3 pb-2 -mt-0.5 scrollbar-none">
+      {/* ── Mobile nav tabs (3-column grid to fit completely on screen) ── */}
+      <div className="md:hidden grid grid-cols-3 gap-1.5 px-3 pb-2 -mt-0.5 w-full">
         {visibleGroups.map((group) => {
           const active = isGroupActive(group);
           const isOpen = openGroup === group.label;
@@ -399,14 +399,14 @@ export default function Navbar() {
             <button
               key={group.label}
               onClick={() => setOpenGroup(isOpen ? null : group.label)}
-              className={`shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 py-1.5 px-1 rounded-lg text-[9.5px] font-semibold transition cursor-pointer ${
                 active
-                  ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950'
-                  : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400'
+                  ? 'bg-white text-slate-900 dark:bg-white dark:text-zinc-950 shadow-sm'
+                  : 'bg-slate-800 text-slate-200 dark:bg-zinc-900 dark:text-zinc-400'
               }`}
             >
-              {t(group.label)}
-              <ChevronDown className={`h-2.5 w-2.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+              <span className="truncate">{t(group.label)}</span>
+              <ChevronDown className={`h-2.5 w-2.5 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
             </button>
           );
         })}

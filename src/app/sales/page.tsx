@@ -327,9 +327,9 @@ export default function Sales() {
                 {/* Invoice header */}
                 <div className="flex justify-between items-start">
                   <div>
-                    <h2 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">APEX CONSTRUCTION LTD</h2>
+                    <h2 className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">DIEULE CONSTRUCTION LTD</h2>
                     <p className="text-[10px] text-zinc-400 dark:text-zinc-500">100 Construction Blvd, New York, NY</p>
-                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500">T: +1-555-0100 | E: billing@apexconstruction.com</p>
+                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500">T: +1-555-0100 | E: billing@dieuleconstruction.com</p>
                   </div>
                   <div className="text-right">
                     <h1 className="text-xs font-bold text-indigo-500 uppercase tracking-widest">Sales Order</h1>
@@ -406,7 +406,7 @@ export default function Sales() {
 
                 {/* Footer notes */}
                 <div className="pt-12 text-[9px] text-zinc-400 dark:text-zinc-550 text-center leading-relaxed">
-                  <p>Thank you for choosing Apex Construction Ltd for your material supply and engineering operations.</p>
+                  <p>Thank you for choosing Dieule Construction Ltd for your material supply and engineering operations.</p>
                   <p className="font-semibold mt-1">Subject to standard terms & conditions. Invoices are valid for 30 days.</p>
                 </div>
 

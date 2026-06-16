@@ -8,7 +8,7 @@ import {
   Target, TrendingUp, ShoppingBag, Archive, Briefcase, 
   ClipboardList, Map, Users, Clock, Calendar, BookOpen, 
   Receipt, CheckSquare, BarChart3, FolderSync, FileText,
-  ArrowRight, Sparkles
+  ArrowRight, Sparkles, Shield, Building2, Grid
 } from 'lucide-react';
 
 interface AppItem {
@@ -90,9 +90,15 @@ const APP_GROUPS: AppGroup[] = [
 ];
 
 export default function Home() {
-  const { companies, activeCompanyId, activeRole, currentUser, t } = useERP();
+  const { companies, activeCompanyId, activeRole, currentUser, language, t } = useERP();
   const { canAccessRoute } = usePermission();
-  const activeCompany = companies.find(c => c.id === activeCompanyId) || companies[0];
+
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const activeCompany = companies.find(c => c.id === activeCompanyId) || companies[0] || { name: 'Dieule ERP' };
 
   // Filter groups by permission
   const visibleGroups = APP_GROUPS.map(group => ({
@@ -100,62 +106,129 @@ export default function Home() {
     items: group.items.filter(item => canAccessRoute(item.href)),
   })).filter(group => group.items.length > 0);
 
-  return (
-    <div className="min-h-[calc(100vh-3.5rem)] p-4 md:p-8 max-w-6xl mx-auto">
-      
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-1">
-          <Sparkles className="h-4 w-4 text-indigo-500" />
-          <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">{t('Command Center')}</span>
-        </div>
-        <h1 className="text-xl md:text-2xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
-          {t('Welcome back')}, {currentUser.full_name}
-        </h1>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-          {t('Role')}: <span className="font-semibold text-zinc-700 dark:text-zinc-300">{t(activeRole)}</span>
-          <span className="mx-2 text-zinc-300 dark:text-zinc-700">•</span>
-          {visibleGroups.reduce((sum, g) => sum + g.items.length, 0)} {t('modules available')}
-        </p>
+  if (!mounted) {
+    return (
+      <div 
+        className="relative min-h-[calc(100vh-3rem)] bg-cover bg-center bg-no-repeat flex flex-col"
+        style={{ backgroundImage: "url('/homepage-bg.jpg')" }}
+      >
+        <div className="absolute inset-0 bg-white/90 dark:bg-zinc-950/94 backdrop-blur-[2px] transition-colors duration-250" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(59,130,246,0.1),transparent_60%)] dark:bg-[radial-gradient(ellipse_at_top_left,rgba(37,99,235,0.15),transparent_50%)] pointer-events-none" />
       </div>
+    );
+  }
 
-      {/* Module groups */}
-      <div className="space-y-6">
-        {visibleGroups.map((group) => (
-          <div key={group.label}>
-            {/* Group header */}
-            <h2 className="text-[11px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3 px-1">
-              {t(group.label)}
-            </h2>
+  return (
+    <div 
+      className="relative min-h-[calc(100vh-3rem)] bg-cover bg-center bg-no-repeat flex flex-col"
+      style={{ backgroundImage: "url('/homepage-bg.jpg')" }}
+    >
+      {/* High-contrast backdrop overlay */}
+      <div className="absolute inset-0 bg-white/90 dark:bg-zinc-950/94 backdrop-blur-[2px] transition-colors duration-250" />
+      
+      {/* Subtle radial gradient overlay for premium lighting */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(59,130,246,0.1),transparent_60%)] dark:bg-[radial-gradient(ellipse_at_top_left,rgba(37,99,235,0.15),transparent_50%)] pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,rgba(139,92,246,0.06),transparent_60%)] dark:bg-[radial-gradient(ellipse_at_bottom_right,rgba(124,58,237,0.1),transparent_50%)] pointer-events-none" />
 
-            {/* Group items grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
-              {group.items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`group relative flex items-center gap-3 rounded-xl border bg-gradient-to-br p-3.5 transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-[0.98] ${group.color}`}
-                  >
-                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${group.iconBg}`}>
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                        {t(item.name)}
-                      </div>
-                      <div className="text-[10px] text-zinc-500 dark:text-zinc-500 mt-0.5 truncate">
-                        {t(item.desc)}
-                      </div>
-                    </div>
-                    <ArrowRight className="h-3.5 w-3.5 text-zinc-300 dark:text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                  </Link>
-                );
-              })}
+      {/* Main Content container */}
+      <div className="relative z-10 p-6 md:p-10 max-w-6xl mx-auto w-full flex-1 space-y-8 animate-in fade-in duration-300">
+        
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 pb-6 border-b border-slate-100 dark:border-zinc-800/80">
+          <div className="space-y-3">
+            {/* Command center active badge */}
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:bg-blue-400/10 dark:text-blue-400 border border-blue-500/15 dark:border-blue-400/15">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-[9px] font-black uppercase tracking-widest">{t('Command Center')}</span>
+            </div>
+
+            {/* Main Greeting */}
+            <h1 className="text-3xl md:text-5xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">
+              Welcome, <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 dark:from-blue-400 dark:via-indigo-400 dark:to-violet-400 bg-clip-text text-transparent">{currentUser.full_name}</span>
+            </h1>
+
+            {/* Badges Row */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {/* Role Badge */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200/60 dark:bg-zinc-900/40 dark:border-zinc-800/50 text-[10px] font-semibold text-slate-700 dark:text-zinc-300 shadow-sm">
+                <Shield className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" />
+                <span>{t('Role')}: <span className="font-bold text-slate-950 dark:text-white">{t(activeRole)}</span></span>
+              </div>
+
+              {/* Company Badge */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200/60 dark:bg-zinc-900/40 dark:border-zinc-800/50 text-[10px] font-semibold text-slate-700 dark:text-zinc-300 shadow-sm">
+                <Building2 className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+                <span className="truncate max-w-[150px]">{activeCompany.name}</span>
+              </div>
+
+              {/* Modules Badge */}
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200/60 dark:bg-zinc-900/40 dark:border-zinc-800/50 text-[10px] font-semibold text-slate-700 dark:text-zinc-300 shadow-sm">
+                <Grid className="h-3.5 w-3.5 text-violet-500 dark:text-violet-400" />
+                <span><span className="font-bold text-slate-950 dark:text-white">{visibleGroups.reduce((sum, g) => sum + g.items.length, 0)}</span> {t('modules available')}</span>
+              </div>
             </div>
           </div>
-        ))}
+
+          {/* Right Side: Date & Time Card */}
+          <div className="hidden md:flex items-center gap-3 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-md border border-slate-200/60 dark:border-zinc-800/80 rounded-xl p-3 shadow-sm shrink-0 self-end">
+            <div className="h-8.5 w-8.5 rounded-lg bg-slate-50 dark:bg-zinc-800 flex items-center justify-center text-slate-500 dark:text-zinc-400">
+              <Calendar className="h-4.5 w-4.5" />
+            </div>
+            <div>
+              <div className="text-[10px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-wider">{t('Today')}</div>
+              <div className="text-xs font-bold text-slate-900 dark:text-zinc-100 mt-0.5">
+                {new Date().toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Module groups */}
+        <div className="space-y-8">
+          {visibleGroups.map((group) => (
+            <div key={group.label} className="space-y-3">
+              {/* Group header */}
+              <h2 className="text-[11px] font-black text-slate-500 dark:text-zinc-400 uppercase tracking-widest px-1">
+                {t(group.label)}
+              </h2>
+
+              {/* Group items grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="group relative flex items-center gap-3.5 rounded-xl border border-slate-200/80 bg-white/90 dark:border-zinc-800/80 dark:bg-zinc-900/90 p-3.5 transition-all duration-200 hover:shadow-md hover:border-blue-500 dark:hover:border-blue-500 hover:scale-[1.02] active:scale-[0.98] shadow-sm"
+                    >
+                      <div className={`h-9.5 w-9.5 rounded-lg flex items-center justify-center shrink-0 ${group.iconBg} shadow-sm`}>
+                        <Icon className="h-4.5 w-4.5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-extrabold text-slate-900 dark:text-zinc-100 tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                          {t(item.name)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-zinc-400 mt-1 leading-snug">
+                          {t(item.desc)}
+                        </div>
+                      </div>
+                      <ArrowRight className="h-3.5 w-3.5 text-slate-400 dark:text-zinc-650 opacity-0 group-hover:opacity-100 transition-all shrink-0 translate-x-[-4px] group-hover:translate-x-0" />
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -3,8 +3,8 @@
 
 -- 1. COMPANIES
 insert into companies (id, name, logo_url, address, phone, email, tax_id, currency) values
-('c8b671a8-ff69-42b7-a37a-77c86f7881c1', 'Công ty Cổ phần Xây dựng Apex', 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&w=100&q=80', '100 Đường Khuất Duy Tiến, Thanh Xuân, Hà Nội', '024-555-0100', 'info@apexconstruction.com.vn', 'MST-010998811', 'VND'),
-('c8b671a8-ff69-42b7-a37a-77c86f7882c2', 'Nhà cung cấp Vật liệu Xây dựng Apex', 'https://images.unsplash.com/photo-1581094288338-2314dddb7ecc?auto=format&fit=crop&w=100&q=80', '250 Đường Quốc lộ 1A, Thuận An, Bình Dương', '0274-555-0200', 'sales@apexmaterials.com.vn', 'MST-010998822', 'VND'),
+('c8b671a8-ff69-42b7-a37a-77c86f7881c1', 'Công ty Cổ phần Xây dựng Dieule', 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&w=100&q=80', '100 Đường Khuất Duy Tiến, Thanh Xuân, Hà Nội', '024-555-0100', 'info@dieuleconstruction.com.vn', 'MST-010998811', 'VND'),
+('c8b671a8-ff69-42b7-a37a-77c86f7882c2', 'Nhà cung cấp Vật liệu Xây dựng Dieule', 'https://images.unsplash.com/photo-1581094288338-2314dddb7ecc?auto=format&fit=crop&w=100&q=80', '250 Đường Quốc lộ 1A, Thuận An, Bình Dương', '0274-555-0200', 'sales@dieulematerials.com.vn', 'MST-010998822', 'VND'),
 ('c8b671a8-ff69-42b7-a37a-77c86f7883c3', 'Tổng công ty Đầu tư & Xây dựng Summit', 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=100&q=80', '50 Đường Lê Lợi, Bến Nghé, Quận 1, TP. Hồ Chí Minh', '028-555-0300', 'contact@summitbuilders.vn', 'MST-010998833', 'VND');
 
 -- 2. USER PROFILES

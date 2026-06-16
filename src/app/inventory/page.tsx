@@ -105,7 +105,7 @@ export default function WMSDashboard() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-200/60 dark:border-zinc-800/60 pb-6">
           <div>
             <div className="flex items-center gap-2 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-widest font-semibold mb-1">
-              <span>{t('Apex ERP')}</span>
+              <span>{t('Dieule ERP')}</span>
               <span>/</span>
               <span className="text-zinc-650 dark:text-zinc-350">{t('Warehouse Management')}</span>
             </div>

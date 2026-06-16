@@ -35,22 +35,22 @@ import { createClient } from '@/utils/supabase/client';
 const SEED_COMPANIES: Company[] = [
   {
     id: 'c8b671a8-ff69-42b7-a37a-77c86f7881c1',
-    name: 'Apex Construction Ltd',
+    name: 'Dieule Construction Ltd',
     logo_url: 'https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&w=100&q=80',
     address: '100 Construction Blvd, New York, NY',
     phone: '+1-555-0100',
-    email: 'info@apexconstruction.com',
+    email: 'info@dieuleconstruction.com',
     tax_id: 'TX-998811',
     currency: 'USD',
     created_at: '2026-06-14T12:00:00Z',
   },
   {
     id: 'c8b671a8-ff69-42b7-a37a-77c86f7882c2',
-    name: 'Apex Material Suppliers',
+    name: 'Dieule Material Suppliers',
     logo_url: 'https://images.unsplash.com/photo-1581094288338-2314dddb7ecc?auto=format&fit=crop&w=100&q=80',
     address: '250 Quarry Rd, Jersey City, NJ',
     phone: '+1-555-0200',
-    email: 'sales@apexmaterials.com',
+    email: 'sales@dieulematerials.com',
     tax_id: 'TX-998822',
     currency: 'USD',
     created_at: '2026-06-14T12:00:00Z',
@@ -1108,7 +1108,7 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       "Goods Issue Notes (Stock-Out)": "Phiếu xuất kho (GIN)",
       "Approve internal job requests, sales order dispatches, and material scrap issues.": "Phê duyệt yêu cầu cấp vật tư công trường, xuất hàng bán và thanh lý phế liệu.",
       "Create Stock-Out Slip": "Tạo phiếu xuất kho",
-      "Sales": "Xuất bán hàng",
+      "Sales": "Bán hàng",
       "Internal": "Tiêu dùng nội bộ",
       "Return Supplier": "Trả nhà cung cấp",
       "Search by issue code, customer/dept...": "Tìm theo số phiếu, khách hàng/phòng ban...",
@@ -1419,8 +1419,10 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Categories
       "Operations": "Vận hành",
+      "Projects": "Dự án",
       "HR": "Nhân sự",
       "Finance": "Tài chính",
+      "Reports": "Báo cáo",
       "System": "Hệ thống",
 
       // Module Titles & Descriptions

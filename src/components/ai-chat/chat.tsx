@@ -35,14 +35,14 @@ export default function AIChatbot() {
     { 
       id: 'init', 
       sender: 'ai', 
-      text: 'Hello! I am your Apex Construction AI Assistant. I can forecast inventory requirements, summarize project timelines, and analyze active budgets. How can I help you today?', 
+      text: 'Hello! I am your Dieule Construction AI Assistant. I can forecast inventory requirements, summarize project timelines, and analyze active budgets. How can I help you today?', 
       timestamp: new Date() 
     }
   ]);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const activeCompany = companies.find(c => c.id === activeCompanyId) || companies[0] || { name: 'Apex' };
+  const activeCompany = companies.find(c => c.id === activeCompanyId) || companies[0] || { name: 'Dieule' };
 
   // Refresh greeting text on language change
   useEffect(() => {
@@ -51,8 +51,8 @@ export default function AIChatbot() {
         id: 'init', 
         sender: 'ai', 
         text: language === 'vi' 
-          ? 'Xin chào! Tôi là Trợ lý AI Xây dựng Apex. Tôi có thể dự báo nhu cầu tồn kho, tóm tắt tiến độ dự án và phân tích ngân sách hoạt động. Tôi có thể giúp gì cho bạn hôm nay?'
-          : 'Hello! I am your Apex Construction AI Assistant. I can forecast inventory requirements, summarize project timelines, and analyze active budgets. How can I help you today?', 
+          ? 'Xin chào! Tôi là Trợ lý AI Xây dựng Dieule. Tôi có thể dự báo nhu cầu tồn kho, tóm tắt tiến độ dự án và phân tích ngân sách hoạt động. Tôi có thể giúp gì cho bạn hôm nay?'
+          : 'Hello! I am your Dieule Construction AI Assistant. I can forecast inventory requirements, summarize project timelines, and analyze active budgets. How can I help you today?', 
         timestamp: new Date() 
       }
     ]);
@@ -116,7 +116,7 @@ export default function AIChatbot() {
           }
         } 
         else {
-          aiText = `Tôi đã ghi nhận yêu cầu của bạn về: "${messageText}". Là trợ lý ảo được tích hợp cho hệ thống Apex ERP, tôi có thể hỗ trợ bạn:\n` +
+          aiText = `Tôi đã ghi nhận yêu cầu của bạn về: "${messageText}". Là trợ lý ảo được tích hợp cho hệ thống Dieule ERP, tôi có thể hỗ trợ bạn:\n` +
                    `1. Liệt kê cảnh báo tồn kho thấp (\`check low stock\`)\n` +
                    `2. Phân tích tiến độ các công trình (\`project summary\`)\n` +
                    `3. Dự báo nhu cầu nguyên vật liệu (\`material forecast\`)\n` +
@@ -155,7 +155,7 @@ export default function AIChatbot() {
           }
         } 
         else {
-          aiText = `I processed your request concerning: "${messageText}". As an AI assistant built for Apex ERP, I can help you with:\n` +
+          aiText = `I processed your request concerning: "${messageText}". As an AI assistant built for Dieule ERP, I can help you with:\n` +
                    `1. Listing low stock alerts (\`check low stock\`)\n` +
                    `2. Analyzing project schedules (\`project summary\`)\n` +
                    `3. Forecasting material demands (\`material forecast\`)\n` +
@@ -215,7 +215,7 @@ export default function AIChatbot() {
                 <Bot className="h-4.5 w-4.5" />
               </div>
               <div>
-                <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-550 leading-tight">{t("Apex AI Assistant")}</h3>
+                <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-550 leading-tight">{t("Dieule AI Assistant")}</h3>
                 <p className="text-[9px] text-zinc-450 dark:text-zinc-500 font-bold tracking-wider uppercase flex items-center gap-0.5 mt-0.5">
                   <Sparkles className="h-2.5 w-2.5 text-indigo-500" /> {t("Context-Aware Active")}
                 </p>

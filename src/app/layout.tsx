@@ -27,13 +27,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Apex ERP — Construction & Contracting Management',
+  title: 'Dieule ERP — Construction & Contracting Management',
   description: 'Enterprise resource planning for construction, contracting and material supply.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Apex ERP',
+    title: 'Dieule ERP',
   },
   icons: {
     apple: '/icon-192.png',
@@ -78,22 +78,49 @@ export default function RootLayout({
           <AIChatbot />
         </ERPProvider>
 
-        <Script id="sw-register" strategy="afterInteractive">
-          {`
-            if ('serviceWorker' in navigator) {
-              const register = () => {
-                navigator.serviceWorker.register('/sw.js')
-                  .then(function(reg) { console.log('SW registered:', reg.scope); })
-                  .catch(function(err) { console.log('SW registration failed:', err); });
-              };
-              if (document.readyState === 'complete') {
-                register();
-              } else {
-                window.addEventListener('load', register);
+        {process.env.NODE_ENV === 'production' ? (
+          <Script id="sw-register" strategy="afterInteractive">
+            {`
+              if ('serviceWorker' in navigator) {
+                const register = () => {
+                  navigator.serviceWorker.register('/sw.js')
+                    .then(function(reg) { console.log('SW registered:', reg.scope); })
+                    .catch(function(err) { console.log('SW registration failed:', err); });
+                };
+                if (document.readyState === 'complete') {
+                  register();
+                } else {
+                  window.addEventListener('load', register);
+                }
               }
-            }
-          `}
-        </Script>
+            `}
+          </Script>
+        ) : (
+          <Script id="sw-unregister" strategy="beforeInteractive">
+            {`
+              if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                  if (registrations.length > 0) {
+                    for (let registration of registrations) {
+                      registration.unregister();
+                    }
+                    if ('caches' in window) {
+                      caches.keys().then(function(keys) {
+                        return Promise.all(keys.map(function(key) { return caches.delete(key); }));
+                      }).then(function() {
+                        console.log('SW and caches cleared in development mode. Reloading...');
+                        window.location.reload();
+                      });
+                    } else {
+                      console.log('SW cleared. Reloading...');
+                      window.location.reload();
+                    }
+                  }
+                });
+              }
+            `}
+          </Script>
+        )}
       </body>
     </html>
   );
