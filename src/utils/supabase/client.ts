@@ -3,8 +3,143 @@ import { createBrowserClient } from "@supabase/ssr";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-export const createClient = () =>
-  createBrowserClient(
+// ── PRE-FLIGHT: Remove expired Supabase tokens from localStorage ─────────────
+// This runs synchronously BEFORE the Supabase client is created.
+// An expired token in localStorage causes ALL requests (even public ones) to
+// fail with JWT errors.
+if (typeof window !== 'undefined') {
+  try {
+    const keysToCheck: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        keysToCheck.push(key)
+      }
+    }
+    for (const storageKey of keysToCheck) {
+      const raw = localStorage.getItem(storageKey)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        const expiresAt: number | undefined = parsed?.expires_at
+        // expires_at is a Unix timestamp in seconds
+        // If it expired more than 30 seconds ago, wipe it so the app starts clean
+        if (expiresAt && Date.now() / 1000 > expiresAt + 30) {
+          localStorage.removeItem(storageKey)
+          console.log('[Supabase Pre-flight] Removed expired auth token from localStorage:', storageKey)
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore any JSON parse or storage access errors
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+let activeRefreshPromise: Promise<{ data: { session: any }; error: any }> | null = null
+
+function getSharedRefreshPromise(supabaseInstance: any): Promise<{ data: { session: any }; error: any }> {
+  if (!activeRefreshPromise) {
+    activeRefreshPromise = supabaseInstance.auth.refreshSession().finally(() => {
+      activeRefreshPromise = null
+    })
+  }
+  return activeRefreshPromise as Promise<{ data: { session: any }; error: any }>
+}
+
+export const createClient = () => {
+  const client = createBrowserClient(
     supabaseUrl!,
     supabaseKey!,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+      global: {
+        fetch: async (url, options) => {
+          const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : ''
+          const isAuthRequest = urlStr.includes('/auth/v1/')
+
+          const res = await fetch(url, options)
+          
+          // Only intercept database/storage requests that return errors
+          if ((res.status === 400 || res.status === 401 || res.status === 403) && !isAuthRequest) {
+            const clone = res.clone()
+            try {
+              const contentType = clone.headers.get('content-type')
+              const body = contentType && contentType.includes('application/json') ? await clone.json() : null
+              const msg = body?.message?.toLowerCase() || ''
+              
+              if (msg.includes('jwt') || msg.includes('expired') || msg.includes('token') || msg.includes('invalid') || body?.code === 'PGRST301') {
+                console.log('[Supabase Client] JWT expired/invalid. Attempting to refresh session...')
+
+                const reqHeaders = new Headers(options?.headers)
+                
+                // Prevent infinite retry loop if we already retried this request
+                if (reqHeaders.has('X-Retry-Auth') || reqHeaders.has('x-retry-auth')) {
+                  console.warn('[Supabase Client] Token refresh retry failed twice. Reverting to guest...')
+                  try {
+                    await client.auth.signOut()
+                  } catch (e) {
+                    // Ignore
+                  }
+                  if (typeof window !== 'undefined') {
+                    const keysToRemove: string[] = []
+                    for (let i = 0; i < localStorage.length; i++) {
+                      const key = localStorage.key(i)
+                      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+                        keysToRemove.push(key)
+                      }
+                    }
+                    keysToRemove.forEach(k => localStorage.removeItem(k))
+                  }
+
+                  reqHeaders.delete('Authorization')
+                  reqHeaders.delete('authorization')
+                  return fetch(url, { ...options, headers: reqHeaders })
+                }
+
+                // Attempt to refresh the Supabase session (shared to prevent concurrent collisions)
+                const { data: { session }, error: refreshError } = await getSharedRefreshPromise(client)
+
+                if (session && !refreshError) {
+                  console.log('[Supabase Client] Session refreshed successfully. Retrying original request...')
+                  
+                  reqHeaders.set('Authorization', `Bearer ${session.access_token}`)
+                  reqHeaders.set('X-Retry-Auth', 'true')
+                  return fetch(url, { ...options, headers: reqHeaders })
+                } else {
+                  console.warn('[Supabase Client] Session refresh failed. Logging out and retrying as guest...')
+                  try {
+                    await client.auth.signOut()
+                  } catch (e) {
+                    // Ignore
+                  }
+                  if (typeof window !== 'undefined') {
+                    const keysToRemove: string[] = []
+                    for (let i = 0; i < localStorage.length; i++) {
+                      const key = localStorage.key(i)
+                      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+                        keysToRemove.push(key)
+                      }
+                    }
+                    keysToRemove.forEach(k => localStorage.removeItem(k))
+                  }
+
+                  reqHeaders.delete('Authorization')
+                  reqHeaders.delete('authorization')
+                  reqHeaders.set('X-Retry-Auth', 'true')
+                  return fetch(url, { ...options, headers: reqHeaders })
+                }
+              }
+            } catch (e) {
+              // Ignore body JSON parse errors
+            }
+          }
+          return res
+        }
+      }
+    }
   );
+  return client;
+};
