@@ -185,6 +185,17 @@ drop policy if exists "Employees are viewable by all authenticated users" on pub
 create policy "Employees are viewable by all authenticated users"
   on public.employees for select to authenticated using (true);
 
+drop policy if exists "Users can create their own employee record" on public.employees;
+create policy "Users can create their own employee record"
+  on public.employees for insert to authenticated
+  with check (user_id = auth.uid() and company_id in (select company_id from public.user_companies where user_id = auth.uid()));
+
+drop policy if exists "Employees can update own record" on public.employees;
+create policy "Employees can update own record"
+  on public.employees for update to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
 drop policy if exists "HR and Admins can manage employees" on public.employees;
 create policy "HR and Admins can manage employees"
   on public.employees for all to authenticated

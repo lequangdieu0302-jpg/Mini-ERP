@@ -33,6 +33,18 @@ create policy "Manage employees policy"
     )
   );
 
+-- Allow insert of own employee record
+drop policy if exists "Insert own employee record policy" on public.employees;
+create policy "Insert own employee record policy"
+  on public.employees for insert to authenticated
+  with check (
+    user_id = auth.uid()
+    and company_id in (
+      select company_id from public.user_companies 
+      where user_id = auth.uid()
+    )
+  );
+
 
 -- 2. SECURE THE USER COMPANIES TABLE
 -- Enable RLS

@@ -417,7 +417,12 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               const { data: ucData } = await supabase.from('user_companies').select('*');
               if (ucData) setUserCompanies(ucData);
             } else {
-              console.error("Error auto-creating user_companies mapping:", insertRoleErr);
+              console.error("Error auto-creating user_companies mapping:", {
+                message: insertRoleErr.message,
+                code: insertRoleErr.code,
+                details: insertRoleErr.details,
+                hint: insertRoleErr.hint,
+              });
             }
           }
 
@@ -438,7 +443,12 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               active: true,
             });
             if (insertEmpErr) {
-              console.error("Error auto-creating employee record:", insertEmpErr);
+              console.error("Error auto-creating employee record:", {
+                message: insertEmpErr.message,
+                code: insertEmpErr.code,
+                details: insertEmpErr.details,
+                hint: insertEmpErr.hint,
+              });
             } else {
               // Re-fetch employees list so the new record is available
               const { data: empData } = await supabase.from('employees').select('*');
@@ -535,7 +545,12 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             active: true,
           });
           if (insertEmpErr) {
-            console.error("Error auto-creating employee record:", insertEmpErr);
+            console.error("Error auto-creating employee record:", {
+              message: insertEmpErr.message,
+              code: insertEmpErr.code,
+              details: insertEmpErr.details,
+              hint: insertEmpErr.hint,
+            });
           } else {
             const { data: empData } = await supabase.from('employees').select('*');
             if (empData && empData.length > 0) setEmployees(empData);

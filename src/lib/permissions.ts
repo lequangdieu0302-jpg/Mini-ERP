@@ -30,8 +30,8 @@ export const ROUTE_MODULE_MAP: Record<string, AppModule> = {
   'site-survey':  'project',
   'field-service':'project',
   'workforce':    'workforce',
-  'timesheet':    'workforce',
-  'attendance':   'workforce',
+  'timesheet':    'payroll',
+  'attendance':   'payroll',
   'accounting':   'accounting',
   'expense':      'expense',
   'approvals':    'approvals',
@@ -128,6 +128,7 @@ const PERMISSIONS: Record<ERPUserRole, ModuleAccess> = {
 
   'HR': {
     dashboard:  READ_ONLY,
+    workforce:  ALL_ACTIONS,
     expense:    NO_DELETE,
     approvals:  NO_DELETE,
     payroll:    ALL_ACTIONS,

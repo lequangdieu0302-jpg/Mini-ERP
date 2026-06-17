@@ -48,7 +48,7 @@ export default function Timesheets() {
   const totalLoggedHours = timesheets.reduce((acc, ts) => acc + ts.hours, 0);
 
   return (
-    <PermissionGuard module="workforce">
+    <PermissionGuard module="payroll">
     <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-6xl mx-auto min-h-screen text-xs">
       
       {/* Header */}
