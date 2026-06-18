@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { ERPProvider } from '@/context/erp-context';
+import { WMSProvider } from '@/context/wms-context';
 import Navbar from '@/components/shell/navbar';
 import Sidebar from '@/components/shell/sidebar';
 import AIChatbot from '@/components/ai-chat/chat';
@@ -58,24 +59,26 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
         <ERPProvider>
-          {/* Top header navigation */}
-          <Navbar />
-          
-          {/* Main workspace layout */}
-          <div className="flex flex-1 overflow-hidden">
-            {/* Context-aware Left Sidebar */}
-            <Suspense fallback={<div className="hidden md:block w-15 md:w-56 shrink-0 bg-slate-50 dark:bg-slate-950" />}>
-              <Sidebar />
-            </Suspense>
+          <WMSProvider>
+            {/* Top header navigation */}
+            <Navbar />
             
-            {/* Scrollable page body */}
-            <main className="flex-1 overflow-y-auto min-w-0 relative pb-20 md:pb-0">
-              {children}
-            </main>
-          </div>
+            {/* Main workspace layout */}
+            <div className="flex flex-1 overflow-hidden">
+              {/* Context-aware Left Sidebar */}
+              <Suspense fallback={<div className="hidden md:block w-15 md:w-56 shrink-0 bg-slate-50 dark:bg-slate-950" />}>
+                <Sidebar />
+              </Suspense>
+              
+              {/* Scrollable page body */}
+              <main className="flex-1 overflow-y-auto min-w-0 relative pb-20 md:pb-0">
+                {children}
+              </main>
+            </div>
 
-          {/* Context-aware AI Chatbot Assistant */}
-          <AIChatbot />
+            {/* Context-aware AI Chatbot Assistant */}
+            <AIChatbot />
+          </WMSProvider>
         </ERPProvider>
 
         {process.env.NODE_ENV === 'production' ? (

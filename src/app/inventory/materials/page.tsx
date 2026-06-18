@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PermissionGuard } from '@/components/permission-guard';
 import { useERP } from '@/context/erp-context';
 import { useWMSState } from '@/hooks/use-wms-state';
+import { createClient } from '@/utils/supabase/client';
 import { Product } from '@/types/erp';
 import { MATERIAL_CATEGORIES } from '@/data/wms-seed';
 import {
@@ -18,14 +19,73 @@ export default function MaterialsCatalog() {
   }, []);
 
   const { t } = useERP();
-  const { products, saveProducts, warehouses } = useWMSState();
+  const { addProduct, updateProduct, deleteProduct, warehouses, categories } = useWMSState();
 
   // Local UI States
+  const [products, setProducts] = useState<Product[]>([]);
+  const [totalProductsCount, setTotalProductsCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+  const itemsPerPage = 10;
+
+  const fetchProducts = async () => {
+    setIsLoading(true);
+    try {
+      const supabase = createClient();
+      let query = supabase.from('products').select('*, uom_table:uom(name), product_categories(name)', { count: 'exact' });
+
+      if (searchTerm.trim()) {
+        query = query.or(`name.ilike.%${searchTerm.trim()}%,sku.ilike.%${searchTerm.trim()}%,barcode.ilike.%${searchTerm.trim()}%`);
+      }
+
+      if (selectedCategory !== 'All') {
+        const cat = categories.find(c => c.name === selectedCategory);
+        if (cat) {
+          query = query.eq('category_id', cat.id);
+        } else {
+          query = query.eq('category_id', selectedCategory);
+        }
+      }
+
+      if (selectedStatus !== 'all') {
+        query = query.eq('status', selectedStatus);
+      }
+
+      const from = (currentPage - 1) * itemsPerPage;
+      const to = from + itemsPerPage - 1;
+
+      const { data, count, error } = await query
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (error) throw error;
+
+      const mapped = (data || []).map((p: any) => ({
+        ...p,
+        category_name: p.product_categories?.name || '',
+        uom: p.uom_table?.name || 'Piece'
+      }));
+
+      setProducts(mapped);
+      setTotalProductsCount(count || 0);
+    } catch (err) {
+      console.error('Error fetching products:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (categories && categories.length > 0) {
+      fetchProducts();
+    }
+  }, [searchTerm, selectedCategory, selectedStatus, currentPage, categories]);
   
   // Toast notifications state
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -64,7 +124,7 @@ export default function MaterialsCatalog() {
     setEditingProduct(null);
     setFormName('');
     setFormSku('');
-    setFormCategory(MATERIAL_CATEGORIES[0]);
+    setFormCategory(categories[0]?.name || '');
     setFormUom('Piece');
     setFormWarehouse(warehouses[0]?.id || '');
     setFormLocation('A-01-01');
@@ -104,7 +164,7 @@ export default function MaterialsCatalog() {
   };
 
   // Handle Save
-  const handleSaveProduct = (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formName || !formSku) {
@@ -114,32 +174,31 @@ export default function MaterialsCatalog() {
 
     if (editingProduct) {
       // Update
-      const updated = products.map(p => {
-        if (p.id === editingProduct.id) {
-          return {
-            ...p,
-            name: formName,
-            sku: formSku,
-            category_name: formCategory,
-            uom: formUom,
-            warehouse_id: formWarehouse,
-            location: formLocation,
-            cost_price: Number(formCostPrice),
-            sale_price: Number(formSalePrice),
-            min_qty: Number(formMinQty),
-            max_qty: Number(formMaxQty),
-            current_qty: Number(formCurrentQty),
-            barcode: formBarcode,
-            manufacturer: formManufacturer,
-            supplier_id: formSupplierId,
-            description: formDescription,
-            status: formStatus
-          };
-        }
-        return p;
-      });
-      saveProducts(updated);
-      showToast(t('Material updated successfully!'));
+      const updates = {
+        name: formName,
+        sku: formSku,
+        category_name: formCategory,
+        uom: formUom,
+        warehouse_id: formWarehouse,
+        location: formLocation,
+        cost_price: Number(formCostPrice),
+        sale_price: Number(formSalePrice),
+        min_qty: Number(formMinQty),
+        max_qty: Number(formMaxQty),
+        current_qty: Number(formCurrentQty),
+        barcode: formBarcode,
+        manufacturer: formManufacturer,
+        supplier_id: formSupplierId,
+        description: formDescription,
+        status: formStatus
+      };
+      const success = await updateProduct(editingProduct.id, updates);
+      if (success) {
+        showToast(t('Material updated successfully!'));
+        fetchProducts();
+      } else {
+        showToast(t('Error updating material.'));
+      }
     } else {
       // Create
       const newProduct: Product = {
@@ -164,38 +223,33 @@ export default function MaterialsCatalog() {
         status: formStatus,
         created_at: new Date().toISOString()
       };
-      saveProducts([newProduct, ...products]);
-      showToast(t('New material added to ledger!'));
+      const success = await addProduct(newProduct);
+      if (success) {
+        showToast(t('New material added to ledger!'));
+        fetchProducts();
+      } else {
+        showToast(t('Error adding material.'));
+      }
     }
     setModalOpen(false);
   };
 
   // Delete
-  const handleDeleteProduct = (id: string) => {
+  const handleDeleteProduct = async (id: string) => {
     if (confirm(t('Are you sure you want to delete this material from records?'))) {
-      const updated = products.filter(p => p.id !== id);
-      saveProducts(updated);
-      showToast(t('Material removed from ledger.'));
+      const success = await deleteProduct(id);
+      if (success) {
+        showToast(t('Material removed from ledger.'));
+        fetchProducts();
+      } else {
+        showToast(t('Error deleting material.'));
+      }
     }
   };
 
-  // Filters logic
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                          (p.barcode && p.barcode.includes(searchTerm));
-    const matchesCategory = selectedCategory === 'All' || p.category_name === selectedCategory;
-    const matchesStatus = selectedStatus === 'all' || p.status === selectedStatus;
-    return matchesSearch && matchesCategory && matchesStatus;
-  });
-
   // Pagination Logic
-  const itemsPerPage = 10;
-  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
-  const displayedProducts = filteredProducts.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+  const totalPages = Math.ceil(totalProductsCount / itemsPerPage);
+  const displayedProducts = products;
 
   if (!mounted) return null;
 
@@ -281,8 +335,8 @@ export default function MaterialsCatalog() {
                 className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2.5 outline-none font-bold text-zinc-700 dark:text-zinc-300"
               >
                 <option value="All">{t('All Categories')}</option>
-                {MATERIAL_CATEGORIES.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.name}>{cat.name}</option>
                 ))}
               </select>
             </div>
@@ -297,13 +351,13 @@ export default function MaterialsCatalog() {
             >
               {t('All Categories')}
             </button>
-            {MATERIAL_CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <button
-                key={cat}
-                onClick={() => { setSelectedCategory(cat); setCurrentPage(1); }}
-                className={`px-3 py-1 rounded-full font-bold transition-all text-[10px] whitespace-nowrap ${selectedCategory === cat ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'}`}
+                key={cat.id}
+                onClick={() => { setSelectedCategory(cat.name); setCurrentPage(1); }}
+                className={`px-3 py-1 rounded-full font-bold transition-all text-[10px] whitespace-nowrap ${selectedCategory === cat.name ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800'}`}
               >
-                {cat}
+                {cat.name}
               </button>
             ))}
           </div>
@@ -465,7 +519,7 @@ export default function MaterialsCatalog() {
           {totalPages > 1 && (
             <div className="flex justify-between items-center px-4 py-3 bg-zinc-50/50 dark:bg-zinc-900/10 border-t border-zinc-200/50 dark:border-zinc-800">
               <span className="text-zinc-450 font-medium">
-                {t('Showing page')} <strong>{currentPage}</strong> {t('of')} <strong>{totalPages}</strong> ({filteredProducts.length} {t('materials')})
+                {t('Showing page')} <strong>{currentPage}</strong> {t('of')} <strong>{totalPages}</strong> ({totalProductsCount} {t('materials')})
               </span>
               <div className="flex gap-1">
                 <button
@@ -543,8 +597,8 @@ export default function MaterialsCatalog() {
                       onChange={(e) => setFormCategory(e.target.value)}
                       className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none text-zinc-850 dark:text-zinc-200 font-bold"
                     >
-                      {MATERIAL_CATEGORIES.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
+                      {categories.map(cat => (
+                        <option key={cat.id} value={cat.name}>{cat.name}</option>
                       ))}
                     </select>
                   </div>

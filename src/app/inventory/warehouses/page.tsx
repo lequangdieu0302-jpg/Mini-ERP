@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PermissionGuard } from '@/components/permission-guard';
 import { useERP } from '@/context/erp-context';
 import { useWMSState } from '@/hooks/use-wms-state';
+import { createClient } from '@/utils/supabase/client';
 import { Warehouse, Product } from '@/types/erp';
 import {
   FolderSync, MapPin, Code, Archive, User, Plus, X, Edit2, Info,
@@ -17,7 +18,55 @@ export default function WarehousesManagement() {
   }, []);
 
   const { t } = useERP();
-  const { warehouses, saveWarehouses, products } = useWMSState();
+  const { warehouses, saveWarehouses } = useWMSState();
+
+  const [summaries, setSummaries] = useState<any[]>([]);
+  const [warehouseItems, setWarehouseItems] = useState<Record<string, Product[]>>({});
+
+  const fetchSummaries = async () => {
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.from('warehouse_stock_summaries').select('*');
+      if (error) throw error;
+      setSummaries(data || []);
+    } catch (err) {
+      console.error('Error fetching summaries:', err);
+    }
+  };
+
+  const fetchWarehouseItems = async (warehouseId: string) => {
+    if (warehouseItems[warehouseId]) return;
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('warehouse_id', warehouseId)
+        .limit(100);
+      if (error) throw error;
+      setWarehouseItems(prev => ({
+        ...prev,
+        [warehouseId]: data || []
+      }));
+    } catch (err) {
+      console.error('Error fetching warehouse items:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (mounted) {
+      fetchSummaries();
+    }
+  }, [mounted]);
+
+  const handleToggleExpand = (warehouseId: string) => {
+    if (expandedWhId === warehouseId) {
+      setExpandedWhId(null);
+    } else {
+      setExpandedWhId(warehouseId);
+      fetchWarehouseItems(warehouseId);
+    }
+  };
 
   // Local UI States
   const [expandedWhId, setExpandedWhId] = useState<string | null>(null);
@@ -116,18 +165,7 @@ export default function WarehousesManagement() {
     saveWarehouses(updated);
   };
 
-  // Get details for warehouse
-  const getWarehouseStats = (warehouseId: string) => {
-    const whProducts = products.filter(p => p.warehouse_id === warehouseId);
-    const totalQty = whProducts.reduce((sum, p) => sum + p.current_qty, 0);
-    const totalVal = whProducts.reduce((sum, p) => sum + (p.current_qty * p.cost_price), 0);
-    return {
-      skuCount: whProducts.length,
-      totalQty,
-      totalVal,
-      items: whProducts
-    };
-  };
+
 
   if (!mounted) return null;
 
@@ -168,8 +206,13 @@ export default function WarehousesManagement() {
         {/* Grid List */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {warehouses.map((wh) => {
-            const stats = getWarehouseStats(wh.id);
+            const whSummary = summaries.find(s => s.warehouse_id === wh.id) || {
+              sku_count: 0,
+              total_qty: 0,
+              total_value: 0
+            };
             const isExpanded = expandedWhId === wh.id;
+            const itemsList = warehouseItems[wh.id] || [];
 
             // Type color coding
             const whType = wh.type || 'raw_materials';
@@ -211,11 +254,11 @@ export default function WarehousesManagement() {
                 <div className="grid grid-cols-2 gap-3 bg-zinc-50 dark:bg-zinc-900/30 p-3 rounded-lg border border-zinc-200/40 dark:border-zinc-850/50 font-mono text-[10px]">
                   <div className="space-y-0.5">
                     <span className="text-[8px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">{t('SKUs Stocked')}</span>
-                    <span className="text-zinc-800 dark:text-zinc-200 font-bold">{stats.skuCount} items</span>
+                    <span className="text-zinc-800 dark:text-zinc-200 font-bold">{whSummary.sku_count} items</span>
                   </div>
                   <div className="space-y-0.5">
                     <span className="text-[8px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">{t('Depot Valuation')}</span>
-                    <span className="text-zinc-800 dark:text-zinc-200 font-bold">${stats.totalVal.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+                    <span className="text-zinc-800 dark:text-zinc-200 font-bold">${whSummary.total_value.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
                   </div>
                 </div>
 
@@ -244,7 +287,7 @@ export default function WarehousesManagement() {
                 {/* Action buttons */}
                 <div className="flex items-center justify-between pt-2">
                   <button
-                    onClick={() => setExpandedWhId(isExpanded ? null : wh.id)}
+                    onClick={() => handleToggleExpand(wh.id)}
                     className="inline-flex items-center gap-1 text-[9px] font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-250 transition-colors"
                   >
                     <Layers3 className="h-3.5 w-3.5" />
@@ -264,10 +307,10 @@ export default function WarehousesManagement() {
                 {isExpanded && (
                   <div className="pt-3 border-t border-zinc-200/50 dark:border-zinc-850 space-y-2 max-h-48 overflow-y-auto pr-1">
                     <h4 className="text-[8px] font-bold text-zinc-450 dark:text-zinc-500 uppercase tracking-widest">{t('Material Inventory details')}</h4>
-                    {stats.items.length === 0 ? (
+                    {itemsList.length === 0 ? (
                       <p className="text-[9.5px] text-zinc-400 dark:text-zinc-550 py-1 text-center font-medium">{t('Depot is currently empty.')}</p>
                     ) : (
-                      stats.items.map(item => (
+                      itemsList.map(item => (
                         <div key={item.id} className="flex justify-between items-center py-1.5 border-b border-zinc-250/20 dark:border-zinc-850/20 last:border-0 font-mono text-[9px]">
                           <div className="flex items-center gap-2 truncate max-w-[170px]">
                             <Archive className="h-3 w-3 text-zinc-400 shrink-0" />

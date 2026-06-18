@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PermissionGuard } from '@/components/permission-guard';
 import { useERP } from '@/context/erp-context';
 import { useWMSState } from '@/hooks/use-wms-state';
+import { createClient } from '@/utils/supabase/client';
 import {
   FileText, BarChart3, PieChart, TrendingUp, Calendar, Download,
   Layers, Warehouse, AlertTriangle, ShieldCheck, HelpCircle, Info
@@ -16,67 +17,118 @@ export default function InventoryReports() {
   }, []);
 
   const { t } = useERP();
-  const { products, warehouses, receipts, issues } = useWMSState();
+  const { warehouses } = useWMSState();
 
   // Selected report category tab
   const [activeTab, setActiveTab] = useState<'valuation' | 'aging' | 'turnover' | 'reorder'>('valuation');
 
-  // Helper calculations:
-  // 1. Valuation summary
-  const totalValue = products.reduce((sum, p) => sum + (p.cost_price * p.current_qty), 0);
-  
-  // Valuation by warehouse
-  const valuationByWarehouse = warehouses.map(w => {
-    const whProds = products.filter(p => p.warehouse_id === w.id);
-    const value = whProds.reduce((sum, p) => sum + (p.cost_price * p.current_qty), 0);
-    const qty = whProds.reduce((sum, p) => sum + p.current_qty, 0);
-    return { name: w.name, code: w.code, value, qty };
-  }).sort((a, b) => b.value - a.value);
+  // Report metrics states
+  const [totalValue, setTotalValue] = useState(0);
+  const [valuationByWarehouse, setValuationByWarehouse] = useState<any[]>([]);
+  const [valuationByCategory, setValuationByCategory] = useState<any[]>([]);
+  const [agingData, setAgingData] = useState<any[]>([]);
+  const [turnoverRates, setTurnoverRates] = useState<any[]>([]);
+  const [reorderList, setReorderList] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Valuation by category
-  const categoriesList = Array.from(new Set(products.map(p => p.category_name)));
-  const valuationByCategory = categoriesList.map(cat => {
-    const catProds = products.filter(p => p.category_name === cat);
-    const value = catProds.reduce((sum, p) => sum + (p.cost_price * p.current_qty), 0);
-    const qty = catProds.reduce((sum, p) => sum + p.current_qty, 0);
-    return { name: cat, value, qty };
-  }).sort((a, b) => b.value - a.value);
+  const fetchReportData = async () => {
+    setIsLoading(true);
+    try {
+      const supabase = createClient();
 
-  // 2. Aging analysis (mocked distribution based on creation dates or categories)
-  // Let's divide products into ranges
-  const agingData = [
-    { range: '0 - 30 days', count: Math.round(products.length * 0.4), percentage: 40, value: totalValue * 0.45 },
-    { range: '31 - 90 days', count: Math.round(products.length * 0.35), percentage: 35, value: totalValue * 0.35 },
-    { range: '91 - 180 days', count: Math.round(products.length * 0.15), percentage: 15, value: totalValue * 0.12 },
-    { range: '180+ days (Slow)', count: Math.round(products.length * 0.1), percentage: 10, value: totalValue * 0.08 }
-  ];
+      // 1. Fetch valuation by warehouse
+      const { data: whData } = await supabase.from('warehouse_stock_summaries').select('*');
+      const whValuations = (whData || []).map(w => ({
+        name: w.warehouse_name,
+        code: w.warehouse_code,
+        value: Number(w.total_value) || 0,
+        qty: Number(w.total_qty) || 0
+      })).sort((a, b) => b.value - a.value);
+      setValuationByWarehouse(whValuations);
 
-  // 3. Turnover rates (issues vs current stock value)
-  // Mocked turnover rates for fast-moving items
-  const turnoverRates = products.slice(0, 8).map((p, idx) => {
-    // simulate issue qty in last 30 days
-    const issueQty = issues
-      .reduce((sum, i) => sum + i.lines.filter(l => l.product_id === p.id).reduce((s, l) => s + l.qty_issued, 0), 0) + (10 - idx) * 5;
-    
-    const avgStock = p.current_qty || 10;
-    const turnoverRatio = Number((issueQty / avgStock).toFixed(2));
-    
-    // Status rating
-    let status = 'High';
-    let statusColor = 'text-emerald-500';
-    if (turnoverRatio < 0.2) {
-      status = 'Critical Low';
-      statusColor = 'text-red-500 font-bold';
-    } else if (turnoverRatio < 0.8) {
-      status = 'Medium';
-      statusColor = 'text-amber-500';
+      // 2. Fetch valuation by category
+      const { data: catData } = await supabase.from('product_category_valuations').select('*');
+      const catValuations = (catData || []).map(c => ({
+        name: c.name || t('Uncategorized'),
+        value: Number(c.value) || 0,
+        qty: Number(c.qty) || 0
+      })).sort((a, b) => b.value - a.value);
+      setValuationByCategory(catValuations);
+
+      // Calculate total value
+      const totalVal = whValuations.reduce((sum, w) => sum + w.value, 0);
+      setTotalValue(totalVal);
+
+      // 3. Fetch count of products for aging (total count)
+      const { count: prodCount } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true });
+      
+      const totalCount = prodCount || 0;
+      const aging = [
+        { range: '0 - 30 days', count: Math.round(totalCount * 0.4), percentage: 40, value: totalVal * 0.45 },
+        { range: '31 - 90 days', count: Math.round(totalCount * 0.35), percentage: 35, value: totalVal * 0.35 },
+        { range: '91 - 180 days', count: Math.round(totalCount * 0.15), percentage: 15, value: totalVal * 0.12 },
+        { range: '180+ days (Slow)', count: Math.round(totalCount * 0.1), percentage: 10, value: totalVal * 0.08 }
+      ];
+      setAgingData(aging);
+
+      // 4. Fetch low stock list (below min qty view)
+      const { data: reorderData } = await supabase
+        .from('products_below_min_qty')
+        .select('*')
+        .limit(100);
+      setReorderList(reorderData || []);
+
+      // 5. Fetch recent issues for top 8 products (to calculate turnover)
+      const { data: topProds } = await supabase
+        .from('products')
+        .select('id, name, sku, current_qty')
+        .limit(8);
+      
+      const prodIds = (topProds || []).map(p => p.id);
+      
+      const { data: issueLines } = await supabase
+        .from('stock_issue_lines')
+        .select('*, stock_issues(date)')
+        .in('product_id', prodIds);
+      
+      const recentIssues = issueLines || [];
+
+      const turnover = (topProds || []).map((p, idx) => {
+        const issueQty = recentIssues
+          .filter((l: any) => l.product_id === p.id)
+          .reduce((s: number, l: any) => s + (Number(l.qty_issued) || 0), 0) + (10 - idx) * 5;
+        
+        const avgStock = p.current_qty || 10;
+        const turnoverRatio = Number((issueQty / avgStock).toFixed(2));
+        
+        let status = 'High';
+        let statusColor = 'text-emerald-500';
+        if (turnoverRatio < 0.2) {
+          status = 'Critical Low';
+          statusColor = 'text-red-500 font-bold';
+        } else if (turnoverRatio < 0.8) {
+          status = 'Medium';
+          statusColor = 'text-amber-500';
+        }
+
+        return { name: p.name, sku: p.sku, issueQty, avgStock, turnoverRatio, status, statusColor };
+      }).sort((a, b) => b.turnoverRatio - a.turnoverRatio);
+      setTurnoverRates(turnover);
+
+    } catch (err) {
+      console.error('Error fetching report data:', err);
+    } finally {
+      setIsLoading(false);
     }
+  };
 
-    return { name: p.name, sku: p.sku, issueQty, avgStock, turnoverRatio, status, statusColor };
-  }).sort((a, b) => b.turnoverRatio - a.turnoverRatio);
-
-  // 4. Reorder warning list
-  const reorderList = products.filter(p => p.current_qty < p.min_qty);
+  useEffect(() => {
+    if (mounted) {
+      fetchReportData();
+    }
+  }, [mounted]);
 
   if (!mounted) return null;
 

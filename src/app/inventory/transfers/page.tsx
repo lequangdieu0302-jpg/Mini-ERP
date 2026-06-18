@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PermissionGuard } from '@/components/permission-guard';
 import { useERP } from '@/context/erp-context';
 import { useWMSState } from '@/hooks/use-wms-state';
+import { createClient } from '@/utils/supabase/client';
+import ProductAutocomplete from '@/components/wms/product-autocomplete';
 import { StockTransfer, StockTransferLine, Product } from '@/types/erp';
 import {
   Search, Plus, Check, Play, X, ChevronDown, ChevronUp,
@@ -18,11 +20,18 @@ export default function StockTransfers() {
 
   const { t } = useERP();
   const {
-    products, saveProducts,
     warehouses,
-    transfers, saveTransfers,
-    transactions, saveTransactions
+    addTransfer,
+    addProduct,
+    updateProduct,
+    addTransaction
   } = useWMSState();
+
+  // Paginated List State
+  const [transfersList, setTransfersList] = useState<any[]>([]);
+  const [totalTransfersCount, setTotalTransfersCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
@@ -42,22 +51,91 @@ export default function StockTransfers() {
     { product_id: '', product_name: '', sku: '', qty: 1 }
   ]);
 
+  const itemsPerPage = 10;
+
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  const handleProductChange = (index: number, productId: string) => {
-    const prod = products.find(p => p.id === productId);
-    if (!prod) return;
+  const fetchTransfers = async () => {
+    setIsLoading(true);
+    try {
+      const supabase = createClient();
+      let query = supabase
+        .from('stock_transfers')
+        .select('*, source:warehouses!source_warehouse_id(name), dest:warehouses!dest_warehouse_id(name), lines:stock_transfer_lines(*, product:products(name, sku))', { count: 'exact' });
 
+      if (selectedStatus !== 'All') {
+        query = query.eq('status', selectedStatus.toLowerCase().replace(' ', '_'));
+      }
+
+      if (searchTerm.trim()) {
+        query = query.or(`transfer_no.ilike.%${searchTerm.trim()}%,notes.ilike.%${searchTerm.trim()}%`);
+      }
+
+      const from = (currentPage - 1) * itemsPerPage;
+      const to = from + itemsPerPage - 1;
+
+      const { data, count, error } = await query
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (error) throw error;
+
+      const mapped = (data || []).map((t: any) => ({
+        id: t.id,
+        company_id: t.company_id,
+        transfer_no: t.transfer_no,
+        source_warehouse_id: t.source_warehouse_id,
+        source_warehouse_name: t.source ? t.source.name : 'Source Depot',
+        dest_warehouse_id: t.dest_warehouse_id,
+        dest_warehouse_name: t.dest ? t.dest.name : 'Dest Depot',
+        date: t.date,
+        status: t.status,
+        notes: t.notes,
+        created_by: t.created_by,
+        created_at: t.created_at,
+        lines: (t.lines || []).map((l: any) => ({
+          id: l.id,
+          transfer_id: l.transfer_id,
+          product_id: l.product_id,
+          product_name: l.product ? l.product.name : 'Unknown Product',
+          sku: l.product ? l.product.sku : '',
+          qty: Number(l.qty) || 0
+        }))
+      }));
+
+      setTransfersList(mapped);
+      setTotalTransfersCount(count || 0);
+    } catch (err) {
+      console.error('Error fetching stock transfers:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTransfers();
+  }, [searchTerm, selectedStatus, currentPage]);
+
+  const handleProductSelect = (index: number, prod: Product | null) => {
     const updated = [...lineItems];
-    updated[index] = {
-      ...updated[index],
-      product_id: prod.id,
-      product_name: prod.name,
-      sku: prod.sku
-    };
+    if (!prod) {
+      updated[index] = {
+        product_id: '',
+        product_name: '',
+        sku: '',
+        qty: updated[index].qty
+      };
+    } else {
+      updated[index] = {
+        ...updated[index],
+        product_id: prod.id,
+        product_name: prod.name,
+        sku: prod.sku || ''
+      };
+    }
     setLineItems(updated);
   };
 
@@ -79,7 +157,7 @@ export default function StockTransfers() {
     setLineItems(lineItems.filter((_, i) => i !== index));
   };
 
-  const handleCreateTransfer = (e: React.FormEvent) => {
+  const handleCreateTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formSourceWhId || !formDestWhId) {
@@ -98,221 +176,246 @@ export default function StockTransfers() {
       return;
     }
 
-    // Check stock availability in source warehouse
-    let insufficient = false;
-    let warningStr = '';
-    lineItems.forEach(item => {
-      // Find source product
-      const prod = products.find(p => p.id === item.product_id);
-      if (prod && prod.current_qty < item.qty) {
-        insufficient = true;
-        warningStr += `[${prod.sku}] ${t('has only')} ${prod.current_qty} ${prod.uom}. `;
-      }
-    });
+    try {
+      const supabase = createClient();
 
-    if (insufficient) {
-      if (!confirm(`${warningStr}\n\n${t('Proceed with creating draft anyway?')}`)) {
-        return;
+      // Check stock availability in source warehouse
+      let insufficient = false;
+      let warningStr = '';
+      
+      for (const item of lineItems) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('name, sku, current_qty')
+          .eq('id', item.product_id)
+          .single();
+
+        if (prod && Number(prod.current_qty) < item.qty) {
+          insufficient = true;
+          warningStr += `[${prod.sku}] ${t('has only')} ${prod.current_qty}. `;
+        }
       }
+
+      if (insufficient) {
+        if (!confirm(`${warningStr}\n\n${t('Proceed with creating draft anyway?')}`)) {
+          return;
+        }
+      }
+
+      const { count } = await supabase
+        .from('stock_transfers')
+        .select('*', { count: 'exact', head: true });
+
+      const nextSeq = (count || 0) + 1;
+      const transferNo = `TRF-${new Date().getFullYear()}-${String(nextSeq).padStart(4, '0')}`;
+
+      // Insert transfer request using context mutation
+      const success = await addTransfer({
+        transfer_no: transferNo,
+        source_warehouse_id: formSourceWhId,
+        dest_warehouse_id: formDestWhId,
+        date: formDate,
+        status: 'pending',
+        notes: formNotes || undefined,
+        lines: lineItems
+      });
+
+      if (success) {
+        setCreateModalOpen(false);
+        showToast(t('Inter-Warehouse Transfer request created!'));
+        fetchTransfers();
+      } else {
+        showToast(t('Failed to create transfer request.'));
+      }
+    } catch (err) {
+      console.error(err);
+      showToast(t('Error creating transfer.'));
     }
-
-    const srcWh = warehouses.find(w => w.id === formSourceWhId);
-    const destWh = warehouses.find(w => w.id === formDestWhId);
-
-    const newTransfer: StockTransfer = {
-      id: `st-${Date.now()}`,
-      company_id: 'c8b671a8-ff69-42b7-a37a-77c86f7881c1',
-      transfer_no: `TRF-${new Date().getFullYear()}-${String(transfers.length + 1).padStart(4, '0')}`,
-      source_warehouse_id: formSourceWhId,
-      source_warehouse_name: srcWh ? srcWh.name : 'Source Depot',
-      dest_warehouse_id: formDestWhId,
-      dest_warehouse_name: destWh ? destWh.name : 'Dest Depot',
-      date: formDate,
-      status: 'pending',
-      notes: formNotes || undefined,
-      lines: lineItems.map((item, idx) => ({
-        ...item,
-        id: `stl-${Date.now()}-${idx}`,
-        transfer_id: `st-${Date.now()}`
-      })),
-      created_by: 'u5',
-      created_at: new Date().toISOString()
-    };
-
-    saveTransfers([newTransfer, ...transfers]);
-    setCreateModalOpen(false);
-    showToast(t('Inter-Warehouse Transfer request created!'));
   };
 
   // Workflow Action 1: Ship/Dispatch (Pending -> In Transit)
-  const handleShip = (id: string) => {
-    const updated = transfers.map(t => {
-      if (t.id === id) return { ...t, status: 'in_transit' as const };
-      return t;
-    });
-    saveTransfers(updated);
-    showToast(t('Transfer is now In Transit. Materials dispatched.'));
+  const handleShip = async (id: string) => {
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('stock_transfers')
+        .update({ status: 'in_transit' })
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast(t('Transfer is now In Transit. Materials dispatched.'));
+      fetchTransfers();
+    } catch (e) {
+      console.error(e);
+      showToast(t('Failed to dispatch transfer.'));
+    }
   };
 
   // Workflow Action 2: Complete (In Transit -> Completed)
-  // Deducts source stock, increases dest stock, logs audit trail
-  const handleComplete = (id: string) => {
-    const trf = transfers.find(t => t.id === id);
+  const handleComplete = async (id: string) => {
+    const trf = transfersList.find(t => t.id === id);
     if (!trf) return;
 
-    // Verify source stock one last time
-    let insufficient = false;
-    let stockSummary = '';
-    trf.lines.forEach(line => {
-      const prod = products.find(p => p.id === line.product_id);
-      if (prod && prod.current_qty < line.qty) {
-        insufficient = true;
-        stockSummary += `\n- ${prod.name} (${t('Req:')} ${line.qty} | ${t('Avail:')} ${prod.current_qty})`;
+    try {
+      const supabase = createClient();
+
+      // Verify source stock one last time
+      let insufficient = false;
+      let stockSummary = '';
+      
+      for (const line of trf.lines) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('name, current_qty')
+          .eq('id', line.product_id)
+          .single();
+
+        const avail = prod ? Number(prod.current_qty) || 0 : 0;
+        if (avail < line.qty) {
+          insufficient = true;
+          stockSummary += `\n- ${prod ? prod.name : 'Product'} (${t('Req:')} ${line.qty} | ${t('Avail:')} ${avail})`;
+        }
       }
-    });
 
-    if (insufficient) {
-      alert(`${t('Cannot complete transfer. Insufficient stock:')}${stockSummary}`);
-      return;
-    }
+      if (insufficient) {
+        alert(`${t('Cannot complete transfer. Insufficient stock:')}${stockSummary}`);
+        return;
+      }
 
-    const updatedProducts = [...products];
-    const newTxns = [...transactions];
+      // Reassign stocks in database
+      for (const line of trf.lines) {
+        // Fetch source product details
+        const { data: prod } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', line.product_id)
+          .single();
 
-    trf.lines.forEach(line => {
-      // 1. Deduct from source product
-      const srcIdx = updatedProducts.findIndex(p => p.id === line.product_id);
-      if (srcIdx !== -1) {
-        const srcProd = updatedProducts[srcIdx];
-        const prevSrcQty = srcProd.current_qty;
+        if (!prod) throw new Error(`Source product ${line.product_id} not found.`);
+
+        const prevSrcQty = Number(prod.current_qty) || 0;
         const postSrcQty = prevSrcQty - line.qty;
 
-        updatedProducts[srcIdx] = {
-          ...srcProd,
-          current_qty: postSrcQty
-        };
+        // 1. Deduct from source warehouse product
+        await updateProduct(line.product_id, { current_qty: postSrcQty });
 
         // Write Stock-Out Transaction for source warehouse
-        newTxns.unshift({
-          id: `tx-trf-src-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        await addTransaction({
           company_id: trf.company_id,
           product_id: line.product_id,
-          product_name: line.product_name,
-          sku: line.sku,
           action: 'transfer',
           reference_no: trf.transfer_no,
           warehouse_id: trf.source_warehouse_id,
-          warehouse_name: trf.source_warehouse_name,
           qty_before: prevSrcQty,
           qty_change: -line.qty,
           qty_after: postSrcQty,
-          value_change: -line.qty * srcProd.cost_price,
-          performed_by: 'u5',
-          performer_name: 'Charlie Stock',
-          notes: trf.notes || `Transfer dispatch to ${trf.dest_warehouse_name}`,
-          created_at: new Date().toISOString()
+          value_change: -line.qty * (Number(prod.cost_price) || 0),
+          notes: trf.notes || `Transfer dispatch to ${trf.dest_warehouse_name}`
         });
 
-        // 2. Add to destination product
-        // Check if destination warehouse already has a product with this SKU
-        const destIdx = updatedProducts.findIndex(p => p.sku === srcProd.sku && p.warehouse_id === trf.dest_warehouse_id);
-        if (destIdx !== -1) {
-          const destProd = updatedProducts[destIdx];
-          const prevDestQty = destProd.current_qty;
+        // 2. Add to destination warehouse product (match by SKU)
+        const { data: destProd } = await supabase
+          .from('products')
+          .select('*')
+          .eq('sku', prod.sku)
+          .eq('warehouse_id', trf.dest_warehouse_id)
+          .maybeSingle();
+
+        if (destProd) {
+          const prevDestQty = Number(destProd.current_qty) || 0;
           const postDestQty = prevDestQty + line.qty;
 
-          updatedProducts[destIdx] = {
-            ...destProd,
-            current_qty: postDestQty
-          };
+          await updateProduct(destProd.id, { current_qty: postDestQty });
 
           // Write Stock-In Transaction for destination warehouse
-          newTxns.unshift({
-            id: `tx-trf-dst-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          await addTransaction({
             company_id: trf.company_id,
             product_id: destProd.id,
-            product_name: destProd.name,
-            sku: destProd.sku,
             action: 'transfer',
             reference_no: trf.transfer_no,
             warehouse_id: trf.dest_warehouse_id,
-            warehouse_name: trf.dest_warehouse_name,
             qty_before: prevDestQty,
             qty_change: line.qty,
             qty_after: postDestQty,
-            value_change: line.qty * destProd.cost_price,
-            performed_by: 'u5',
-            performer_name: 'Charlie Stock',
-            notes: trf.notes || `Received transfer from ${trf.source_warehouse_name}`,
-            created_at: new Date().toISOString()
+            value_change: line.qty * (Number(destProd.cost_price) || 0),
+            notes: trf.notes || `Received transfer from ${trf.source_warehouse_name}`
           });
         } else {
-          // Create new product entry for destination warehouse
-          const newDestProdId = `p-trf-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+          // Create new product record for destination warehouse
           const newDestProduct: Product = {
-            ...srcProd,
-            id: newDestProdId,
-            warehouse_id: trf.dest_warehouse_id,
-            location: 'A-01-01', // default starting location
+            id: `p-trf-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+            company_id: trf.company_id,
+            name: prod.name,
+            sku: prod.sku,
+            barcode: prod.barcode,
+            description: prod.description,
+            category_id: prod.category_id,
+            uom_id: prod.uom_id,
+            sale_price: Number(prod.sale_price) || 0,
+            cost_price: Number(prod.cost_price) || 0,
+            is_material: prod.is_material,
+            min_qty: Number(prod.min_qty) || 0,
+            max_qty: prod.max_qty ? Number(prod.max_qty) : undefined,
             current_qty: line.qty,
+            warehouse_id: trf.dest_warehouse_id,
+            location: 'A-01-01',
+            manufacturer: prod.manufacturer,
+            status: 'active',
             created_at: new Date().toISOString()
           };
 
-          updatedProducts.push(newDestProduct);
+          await addProduct(newDestProduct);
 
-          // Write Stock-In Transaction for destination warehouse
-          newTxns.unshift({
-            id: `tx-trf-dst-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          // Write Stock-In Transaction for destination warehouse (New SKU assignment)
+          await addTransaction({
             company_id: trf.company_id,
-            product_id: newDestProdId,
-            product_name: srcProd.name,
-            sku: srcProd.sku,
+            product_id: newDestProduct.id,
             action: 'transfer',
             reference_no: trf.transfer_no,
             warehouse_id: trf.dest_warehouse_id,
-            warehouse_name: trf.dest_warehouse_name,
             qty_before: 0,
             qty_change: line.qty,
             qty_after: line.qty,
-            value_change: line.qty * srcProd.cost_price,
-            performed_by: 'u5',
-            performer_name: 'Charlie Stock',
-            notes: trf.notes || `Received transfer from ${trf.source_warehouse_name} (New SKU assignment)`,
-            created_at: new Date().toISOString()
+            value_change: line.qty * (Number(prod.cost_price) || 0),
+            notes: trf.notes || `Received transfer from ${trf.source_warehouse_name} (New SKU assignment)`
           });
         }
       }
-    });
 
-    saveProducts(updatedProducts);
-    saveTransactions(newTxns);
+      // Update transfer status
+      const { error: rErr } = await supabase
+        .from('stock_transfers')
+        .update({ status: 'completed' })
+        .eq('id', id);
 
-    // Update status
-    const updatedTransfers = transfers.map(t => {
-      if (t.id === id) return { ...t, status: 'completed' as const };
-      return t;
-    });
-    saveTransfers(updatedTransfers);
-    showToast(t('Stock Transfer completed! Quantities reassigned.'));
+      if (rErr) throw rErr;
+
+      showToast(t('Stock Transfer completed! Quantities reassigned.'));
+      fetchTransfers();
+    } catch (e) {
+      console.error('Error completing stock transfer:', e);
+      showToast(t('Error completing transfer.'));
+    }
   };
 
-  const handleCancel = (id: string) => {
-    const updated = transfers.map(t => {
-      if (t.id === id) return { ...t, status: 'cancelled' as const };
-      return t;
-    });
-    saveTransfers(updated);
-    showToast(t('Transfer cancelled.'));
+  const handleCancel = async (id: string) => {
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('stock_transfers')
+        .update({ status: 'cancelled' })
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast(t('Transfer cancelled.'));
+      fetchTransfers();
+    } catch (e) {
+      console.error(e);
+      showToast(t('Failed to cancel transfer.'));
+    }
   };
 
-  // Filter
-  const filteredTransfers = transfers.filter(t => {
-    const matchesSearch = t.transfer_no.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          t.source_warehouse_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          t.dest_warehouse_name?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = selectedStatus === 'All' || t.status === selectedStatus.toLowerCase().replace(' ', '_');
-    return matchesSearch && matchesStatus;
-  });
+  const totalPages = Math.ceil(totalTransfersCount / itemsPerPage);
 
   if (!mounted) return null;
 
@@ -331,7 +434,7 @@ export default function StockTransfers() {
         {/* Title */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-200/60 dark:border-zinc-800/60 pb-6">
           <div>
-            <h1 className="text-xl md:text-2xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight">
+            <h1 className="text-xl md:text-2xl font-black text-zinc-900 dark:text-zinc-55 tracking-tight">
               {t('Inter-Warehouse Material Transfers')}
             </h1>
             <p className="text-[10px] text-zinc-500 dark:text-zinc-450 mt-1">
@@ -364,8 +467,11 @@ export default function StockTransfers() {
             {['All', 'Pending', 'In Transit', 'Completed'].map((status) => (
               <button
                 key={status}
-                onClick={() => setSelectedStatus(status)}
-                className={`px-3 py-1.5 rounded-md font-bold transition-colors uppercase tracking-wider text-[9px] ${selectedStatus === status ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950' : 'bg-transparent text-zinc-500 hover:bg-zinc-200/40 dark:hover:bg-zinc-800'}`}
+                onClick={() => {
+                  setSelectedStatus(status);
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-md font-bold transition-colors uppercase tracking-wider text-[9px] ${selectedStatus === status ? 'bg-zinc-955 text-white dark:bg-white dark:text-zinc-950' : 'bg-transparent text-zinc-500 hover:bg-zinc-200/40 dark:hover:bg-zinc-800'}`}
               >
                 {t(status)}
               </button>
@@ -379,7 +485,10 @@ export default function StockTransfers() {
               type="text"
               placeholder={t('Search by transfer no, yard...')}
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-md pl-8 pr-3 py-1.5 outline-none text-zinc-855 dark:text-zinc-200"
             />
           </div>
@@ -404,14 +513,20 @@ export default function StockTransfers() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200/40 dark:divide-zinc-850/40">
-                {filteredTransfers.length === 0 ? (
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={9} className="text-center py-10 text-zinc-450 bg-zinc-50/10 dark:bg-zinc-900/5 font-bold">
+                      {t('Loading...')}
+                    </td>
+                  </tr>
+                ) : transfersList.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="text-center py-10 text-zinc-450 bg-zinc-50/10 dark:bg-zinc-900/5">
                       {t('No transfer logs found.')}
                     </td>
                   </tr>
                 ) : (
-                  filteredTransfers.map((tr) => {
+                  transfersList.map((tr) => {
                     const isExpanded = expandedTransferId === tr.id;
 
                     // Color code status
@@ -448,25 +563,25 @@ export default function StockTransfers() {
                               {tr.status === 'pending' && (
                                 <button
                                   onClick={() => handleShip(tr.id)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/20 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-200/40 dark:border-blue-800/40 rounded font-bold"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/20 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-200/40 dark:border-blue-800/40 rounded font-bold transition-colors"
                                 >
-                                  <Play className="h-3 w-3" />
-                                  {t('Ship Goods')}
+                                  <CornerRightDown className="h-3 w-3 rotate-270" />
+                                  {t('Ship Cargo')}
                                 </button>
                               )}
                               {tr.status === 'in_transit' && (
                                 <button
                                   onClick={() => handleComplete(tr.id)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/20 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-450 border border-emerald-200/40 dark:border-emerald-800/40 rounded font-bold"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/20 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-450 border border-emerald-200/40 dark:border-emerald-800/40 rounded font-bold transition-colors"
                                 >
-                                  <ClipboardCheck className="h-3 w-3" />
-                                  {t('Receive Goods')}
+                                  <Check className="h-3 w-3" />
+                                  {t('Acknowledge Receipt')}
                                 </button>
                               )}
                               {(tr.status === 'pending' || tr.status === 'in_transit') && (
                                 <button
                                   onClick={() => handleCancel(tr.id)}
-                                  className="p-1 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 rounded font-bold"
+                                  className="p-1 hover:bg-red-50 dark:hover:bg-red-955/20 text-red-500 rounded"
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </button>
@@ -475,26 +590,26 @@ export default function StockTransfers() {
                           </td>
                         </tr>
 
-                        {/* Line details */}
+                        {/* Expanded table details */}
                         {isExpanded && (
                           <tr className="bg-zinc-50/20 dark:bg-zinc-900/5">
                             <td colSpan={9} className="py-4 px-8 border-t border-b border-zinc-200/50 dark:border-zinc-850/50">
                               <div className="space-y-3">
-                                <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{t('Transferred Items List')}</h4>
-                                <div className="border border-zinc-200/40 dark:border-zinc-850 rounded-lg overflow-hidden max-w-xl">
-                                  <table className="w-full text-left text-[10px] border-collapse bg-white dark:bg-zinc-955">
+                                <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">{t('Transferred items list')}</h4>
+                                <div className="border border-zinc-200/40 dark:border-zinc-850 rounded-lg overflow-hidden">
+                                  <table className="w-full text-left text-[10px] border-collapse bg-white dark:bg-zinc-950">
                                     <thead>
-                                      <tr className="bg-zinc-50 dark:bg-zinc-900 font-bold border-b border-zinc-200/40 dark:border-zinc-850 text-zinc-450 dark:text-zinc-500">
+                                      <tr className="bg-zinc-50 dark:bg-zinc-900 font-bold border-b border-zinc-200/40 dark:border-zinc-850 text-zinc-450 dark:text-zinc-550">
                                         <th className="py-2 px-3">{t('SKU')}</th>
                                         <th className="py-2 px-3">{t('Material')}</th>
-                                        <th className="py-2 px-3 text-right font-mono">{t('Transfer Qty')}</th>
+                                        <th className="py-2 px-3 text-right font-mono">{t('Qty Transferred')}</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-zinc-150/40 dark:divide-zinc-850/30">
-                                      {tr.lines.map((l) => (
+                                      {tr.lines.map((l: any) => (
                                         <tr key={l.id}>
-                                          <td className="py-2 px-3 font-mono font-bold text-zinc-800 dark:text-zinc-200">{l.sku}</td>
-                                          <td className="py-2 px-3 text-zinc-750 dark:text-zinc-350">{l.product_name}</td>
+                                          <td className="py-2 px-3 font-mono font-bold text-zinc-850 dark:text-zinc-200">{l.sku}</td>
+                                          <td className="py-2 px-3 text-zinc-700 dark:text-zinc-350">{l.product_name}</td>
                                           <td className="py-2 px-3 text-right font-mono font-bold">{l.qty}</td>
                                         </tr>
                                       ))}
@@ -517,19 +632,44 @@ export default function StockTransfers() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination buttons */}
+          {!isLoading && totalPages > 1 && (
+            <div className="flex justify-between items-center px-4 py-3 bg-zinc-50/50 dark:bg-zinc-900/10 border-t border-zinc-200/50 dark:border-zinc-800">
+              <span className="text-zinc-450 font-medium">
+                {t('Showing page')} <strong>{currentPage}</strong> {t('of')} <strong>{totalPages}</strong> ({transfersList.length} {t('transfers')})
+              </span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-650 dark:text-zinc-450 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  {t('Previous')}
+                </button>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-650 dark:text-zinc-450 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  {t('Next')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Modal Form for Create */}
         {createModalOpen && (
           <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-zinc-955 border border-zinc-250 dark:border-zinc-850 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col animate-scale-up">
+            <div className="bg-white dark:bg-zinc-955 border border-zinc-250 dark:border-zinc-850 rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden max-h-[90vh] flex flex-col animate-scale-up">
               
-              {/* Header */}
+              {/* Modal Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200/60 dark:border-zinc-850">
-                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-550">
-                  {t('Request Inter-Warehouse Stock Transfer')}
+                <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-50">
+                  {t('New Inter-Warehouse Stock Transfer')}
                 </h3>
-                <button onClick={() => setCreateModalOpen(false)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded text-zinc-455">
+                <button onClick={() => setCreateModalOpen(false)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded text-zinc-450 cursor-pointer">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -537,17 +677,17 @@ export default function StockTransfers() {
               {/* Form Content */}
               <form onSubmit={handleCreateTransfer} className="flex-1 overflow-y-auto p-5 space-y-4">
                 
-                {/* Meta properties */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-zinc-50 dark:bg-zinc-900/40 p-4 rounded-lg border border-zinc-200/30 dark:border-zinc-855/50">
+                {/* Meta Details */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-zinc-50 dark:bg-zinc-900/40 p-4 rounded-lg border border-zinc-200/30 dark:border-zinc-850/50">
                   
-                  {/* Source */}
+                  {/* Source Warehouse */}
                   <div className="space-y-1">
-                    <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t('Source Warehouse Depot *')}</label>
+                    <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t('Source Depot *')}</label>
                     <select
                       required
                       value={formSourceWhId}
                       onChange={(e) => setFormSourceWhId(e.target.value)}
-                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-205 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none font-bold text-zinc-855 dark:text-zinc-200"
+                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none font-bold text-zinc-850 dark:text-zinc-200"
                     >
                       <option value="">{t('Select Source...')}</option>
                       {warehouses.map(w => (
@@ -556,14 +696,14 @@ export default function StockTransfers() {
                     </select>
                   </div>
 
-                  {/* Destination */}
+                  {/* Dest Warehouse */}
                   <div className="space-y-1">
                     <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t('Destination Depot *')}</label>
                     <select
                       required
                       value={formDestWhId}
                       onChange={(e) => setFormDestWhId(e.target.value)}
-                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-205 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none font-bold text-zinc-855 dark:text-zinc-200"
+                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none font-bold text-zinc-850 dark:text-zinc-200"
                     >
                       <option value="">{t('Select Destination...')}</option>
                       {warehouses.map(w => (
@@ -572,29 +712,29 @@ export default function StockTransfers() {
                     </select>
                   </div>
 
-                  {/* Date */}
+                  {/* Transfer date */}
                   <div className="space-y-1">
-                    <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t('Transfer Shipment Date')}</label>
+                    <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t('Shipment Date')}</label>
                     <input
                       type="date"
                       value={formDate}
                       onChange={(e) => setFormDate(e.target.value)}
-                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-205 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none text-zinc-850 dark:text-zinc-200 font-mono"
+                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none text-zinc-855 dark:text-zinc-200 font-mono"
                     />
                   </div>
 
                 </div>
 
-                {/* Line Items */}
+                {/* Line items spreadsheet */}
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">{t('Items to Transfer')}</h4>
+                    <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-550 uppercase tracking-wider">{t('Transfer Lines')}</h4>
                     <button
                       type="button"
                       onClick={addLine}
-                      className="px-2.5 py-1 text-[9px] bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 rounded font-bold border border-zinc-200/50 dark:border-zinc-850"
+                      className="px-2.5 py-1 text-[9px] bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 rounded font-bold border border-zinc-200/50 dark:border-zinc-850 cursor-pointer"
                     >
-                      + {t('Add SKU')}
+                      + {t('Add Item')}
                     </button>
                   </div>
 
@@ -602,70 +742,59 @@ export default function StockTransfers() {
                     <table className="w-full text-left border-collapse text-[10px]">
                       <thead>
                         <tr className="bg-zinc-50 dark:bg-zinc-900 font-bold border-b border-zinc-200/60 dark:border-zinc-850 text-zinc-450 dark:text-zinc-500">
-                          <th className="py-2 px-3">{t('Select Material SKU (Matches Source Warehouse stock)')}</th>
-                          <th className="py-2 px-3 w-[150px] font-mono">{t('Quantity to Transfer')}</th>
-                          <th className="py-2 px-3 w-[40px]"></th>
+                          <th className="py-2.5 px-3 w-[450px]">{t('Select Material SKU (Matches Source Warehouse stock)')}</th>
+                          <th className="py-2.5 px-3 w-[150px] font-mono">{t('Qty to Transfer')}</th>
+                          <th className="py-2.5 px-3 w-[40px]"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-250/20 dark:divide-zinc-850/45">
-                        {lineItems.map((item, idx) => {
-                          // Filter products matching source warehouse to make selecting clean
-                          const filteredSourceProducts = formSourceWhId 
-                            ? products.filter(p => p.warehouse_id === formSourceWhId)
-                            : products;
-
-                          return (
-                            <tr key={idx} className="bg-white dark:bg-zinc-955">
-                              <td className="py-2 px-3">
-                                <select
-                                  required
-                                  value={item.product_id}
-                                  onChange={(e) => handleProductChange(idx, e.target.value)}
-                                  className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-bold text-zinc-800 dark:text-zinc-200"
-                                >
-                                  <option value="">{t('Select Material...')}</option>
-                                  {filteredSourceProducts.map(p => (
-                                    <option key={p.id} value={p.id}>[{p.sku}] {p.name} ({p.current_qty} {p.uom} available)</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="py-2 px-3">
-                                <input
-                                  type="number"
-                                  required
-                                  min="1"
-                                  value={item.qty}
-                                  onChange={(e) => handleQtyChange(idx, Number(e.target.value))}
-                                  className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono"
-                                />
-                              </td>
-                              <td className="py-2 px-3 text-center">
-                                <button
-                                  type="button"
-                                  disabled={lineItems.length === 1}
-                                  onClick={() => removeLine(idx)}
-                                  className="text-red-500 disabled:opacity-30 hover:bg-red-50 dark:hover:bg-red-950/20 p-1 rounded"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {lineItems.map((item, idx) => (
+                          <tr key={idx} className="bg-white dark:bg-zinc-955">
+                            <td className="py-2 px-3 align-middle">
+                              <ProductAutocomplete
+                                warehouseId={formSourceWhId || undefined}
+                                onSelect={(prod) => handleProductSelect(idx, prod)}
+                                excludeIds={lineItems.map(l => l.product_id).filter(id => id !== item.product_id)}
+                                placeholder={t('Search source depot materials...')}
+                                initialProductId={item.product_id || undefined}
+                              />
+                            </td>
+                            <td className="py-2 px-3 align-middle">
+                              <input
+                                type="number"
+                                required
+                                min="1"
+                                value={item.qty}
+                                onChange={(e) => handleQtyChange(idx, Number(e.target.value))}
+                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono text-[10px]"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-center align-middle">
+                              <button
+                                type="button"
+                                disabled={lineItems.length === 1}
+                                onClick={() => removeLine(idx)}
+                                className="text-red-500 disabled:opacity-30 hover:bg-red-50 dark:hover:bg-red-950/20 p-1 rounded cursor-pointer"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
                 </div>
 
-                {/* Notes */}
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t('Transfer Reason / Remarks')}</label>
+                {/* Notes remarks */}
+                <div className="space-y-1 pt-3">
+                  <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">{t('Logistics notes')}</label>
                   <textarea
                     rows={2}
                     value={formNotes}
                     onChange={(e) => setFormNotes(e.target.value)}
-                    placeholder={t('Enter logical details, carrier company, driver references, etc...')}
-                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none resize-none"
+                    placeholder={t('Enter tracking numbers, driver info, vehicle plates...')}
+                    className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none resize-none text-[10px]"
                   />
                 </div>
 
@@ -674,15 +803,15 @@ export default function StockTransfers() {
                   <button
                     type="button"
                     onClick={() => setCreateModalOpen(false)}
-                    className="px-4 py-2 border border-zinc-250 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-lg text-zinc-650 dark:text-zinc-350 font-bold transition-colors"
+                    className="px-4 py-2 border border-zinc-250 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-lg text-zinc-650 dark:text-zinc-350 font-bold transition-colors cursor-pointer"
                   >
                     {t('Cancel')}
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:opacity-95 rounded-lg font-bold transition-opacity"
+                    className="px-4 py-2 bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:opacity-95 rounded-lg font-bold transition-opacity cursor-pointer"
                   >
-                    {t('Save Transfer Request')}
+                    {t('Request Transfer')}
                   </button>
                 </div>
 

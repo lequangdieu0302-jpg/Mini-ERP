@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PermissionGuard } from '@/components/permission-guard';
 import { useERP } from '@/context/erp-context';
 import { useWMSState } from '@/hooks/use-wms-state';
+import { createClient } from '@/utils/supabase/client';
+import ProductAutocomplete from '@/components/wms/product-autocomplete';
 import { StockReceipt, StockReceiptLine, Product } from '@/types/erp';
 import {
   Search, Plus, Check, Play, X, Eye, FileText, ChevronDown, ChevronUp,
@@ -18,12 +20,18 @@ export default function StockInModule() {
 
   const { t } = useERP();
   const {
-    products, saveProducts,
     warehouses,
-    receipts, saveReceipts,
-    transactions, saveTransactions,
-    batches, saveBatches
+    addReceipt,
+    updateProduct,
+    addBatch,
+    addTransaction
   } = useWMSState();
+
+  // Paginated List State
+  const [receiptsList, setReceiptsList] = useState<any[]>([]);
+  const [totalReceiptsCount, setTotalReceiptsCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,26 +54,105 @@ export default function StockInModule() {
     { product_id: '', product_name: '', sku: '', qty: 1, unit_price: 0, amount: 0, batch_no: '', location: '' }
   ]);
 
+  const itemsPerPage = 10;
+
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  // Helper: auto-fill product data
-  const handleProductChange = (index: number, productId: string) => {
-    const prod = products.find(p => p.id === productId);
-    if (!prod) return;
+  const fetchReceipts = async () => {
+    setIsLoading(true);
+    try {
+      const supabase = createClient();
+      let query = supabase
+        .from('stock_receipts')
+        .select('*, warehouse:warehouses(name), supplier:vendors(name), lines:stock_receipt_lines(*, product:products(name, sku))', { count: 'exact' });
 
+      if (selectedType !== 'All') {
+        query = query.eq('receipt_type', selectedType.toLowerCase());
+      }
+
+      if (searchTerm.trim()) {
+        query = query.or(`receipt_no.ilike.%${searchTerm.trim()}%,notes.ilike.%${searchTerm.trim()}%`);
+      }
+
+      const from = (currentPage - 1) * itemsPerPage;
+      const to = from + itemsPerPage - 1;
+
+      const { data, count, error } = await query
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (error) throw error;
+
+      const mapped = (data || []).map((r: any) => ({
+        id: r.id,
+        company_id: r.company_id,
+        receipt_no: r.receipt_no,
+        receipt_type: r.receipt_type,
+        warehouse_id: r.warehouse_id,
+        warehouse_name: r.warehouse ? r.warehouse.name : 'Depot',
+        supplier_id: r.supplier_id,
+        supplier_name: r.supplier ? r.supplier.name : '',
+        date: r.date,
+        status: r.status,
+        total_amount: Number(r.total_amount) || 0,
+        notes: r.notes,
+        created_by: r.created_by,
+        created_at: r.created_at,
+        lines: (r.lines || []).map((l: any) => ({
+          id: l.id,
+          receipt_id: l.receipt_id,
+          product_id: l.product_id,
+          product_name: l.product ? l.product.name : 'Unknown Material',
+          sku: l.product ? l.product.sku : '',
+          qty: Number(l.qty) || 0,
+          unit_price: Number(l.unit_price) || 0,
+          amount: Number(l.amount) || 0,
+          batch_no: l.batch_no || '',
+          serial_no: l.serial_no || '',
+          location: l.location || ''
+        }))
+      }));
+
+      setReceiptsList(mapped);
+      setTotalReceiptsCount(count || 0);
+    } catch (err) {
+      console.error('Error fetching receipts:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchReceipts();
+  }, [searchTerm, selectedType, currentPage]);
+
+  const handleProductSelect = (index: number, prod: Product | null) => {
     const updated = [...lineItems];
-    updated[index] = {
-      ...updated[index],
-      product_id: prod.id,
-      product_name: prod.name,
-      sku: prod.sku,
-      unit_price: prod.cost_price,
-      amount: prod.cost_price * updated[index].qty,
-      location: prod.location || 'A-01-01'
-    };
+    if (!prod) {
+      updated[index] = {
+        product_id: '',
+        product_name: '',
+        sku: '',
+        qty: updated[index].qty,
+        unit_price: 0,
+        amount: 0,
+        batch_no: '',
+        location: ''
+      };
+    } else {
+      updated[index] = {
+        ...updated[index],
+        product_id: prod.id,
+        product_name: prod.name,
+        sku: prod.sku || '',
+        unit_price: prod.cost_price,
+        amount: prod.cost_price * updated[index].qty,
+        location: prod.location || 'A-01-01'
+      };
+    }
     setLineItems(updated);
   };
 
@@ -111,7 +198,7 @@ export default function StockInModule() {
   const receiptTotal = lineItems.reduce((sum, item) => sum + item.amount, 0);
 
   // Submit Receipt Draft
-  const handleCreateReceipt = (e: React.FormEvent) => {
+  const handleCreateReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formWarehouseId) {
@@ -126,137 +213,148 @@ export default function StockInModule() {
       return;
     }
 
-    const wh = warehouses.find(w => w.id === formWarehouseId);
+    try {
+      const supabase = createClient();
+      const { count } = await supabase
+        .from('stock_receipts')
+        .select('*', { count: 'exact', head: true });
 
-    const newReceipt: StockReceipt = {
-      id: `sr-${Date.now()}`,
-      company_id: 'c8b671a8-ff69-42b7-a37a-77c86f7881c1',
-      receipt_no: `GRN-${new Date().getFullYear()}-${String(receipts.length + 1).padStart(4, '0')}`,
-      receipt_type: formType,
-      warehouse_id: formWarehouseId,
-      warehouse_name: wh ? wh.name : 'Depot',
-      supplier_name: formSupplier || undefined,
-      date: formDate,
-      status: 'draft',
-      total_amount: receiptTotal,
-      notes: formNotes || undefined,
-      lines: lineItems.map((item, idx) => ({
-        ...item,
-        id: `srl-${Date.now()}-${idx}`,
-        receipt_id: `sr-${Date.now()}`
-      })),
-      created_by: 'u5',
-      created_at: new Date().toISOString()
-    };
+      const nextSeq = (count || 0) + 1;
+      const receiptNo = `GRN-${new Date().getFullYear()}-${String(nextSeq).padStart(4, '0')}`;
 
-    saveReceipts([newReceipt, ...receipts]);
-    setCreateModalOpen(false);
-    showToast(t('Stock-In Draft Slip Created!'));
+      // Insert receipt and line items
+      const success = await addReceipt({
+        receipt_no: receiptNo,
+        receipt_type: formType,
+        warehouse_id: formWarehouseId,
+        date: formDate,
+        status: 'draft',
+        notes: formNotes || undefined,
+        total_amount: receiptTotal,
+        lines: lineItems
+      });
+
+      if (success) {
+        setCreateModalOpen(false);
+        showToast(t('Stock-In Draft Slip Created!'));
+        fetchReceipts();
+      } else {
+        showToast(t('Failed to create stock receipt.'));
+      }
+    } catch (err) {
+      console.error(err);
+      showToast(t('Error creating receipt.'));
+    }
   };
 
   // Status Action 1: Approve (Draft -> Approved)
-  const handleApprove = (id: string) => {
-    const updated = receipts.map(r => {
-      if (r.id === id) return { ...r, status: 'approved' as const };
-      return r;
-    });
-    saveReceipts(updated);
-    showToast(t('Stock-In slip approved. Ready for storage inspection.'));
+  const handleApprove = async (id: string) => {
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('stock_receipts')
+        .update({ status: 'approved' })
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast(t('Stock-In slip approved. Ready for storage inspection.'));
+      fetchReceipts();
+    } catch (e) {
+      console.error(e);
+      showToast(t('Failed to approve receipt.'));
+    }
   };
 
   // Status Action 2: Complete (Approved -> Completed)
-  // CRITICAL: Updates product inventory counts, creates a batch if batch_no is listed, writes to transaction logs!
-  const handleComplete = (id: string) => {
-    const receipt = receipts.find(r => r.id === id);
+  const handleComplete = async (id: string) => {
+    const receipt = receiptsList.find(r => r.id === id);
     if (!receipt) return;
 
-    // 1. Update Product Quantities
-    const updatedProducts = [...products];
-    const newTxns = [...transactions];
-    const newBatches = [...batches];
+    try {
+      const supabase = createClient();
 
-    receipt.lines.forEach(line => {
-      const prodIdx = updatedProducts.findIndex(p => p.id === line.product_id);
-      if (prodIdx !== -1) {
-        const prevQty = updatedProducts[prodIdx].current_qty;
-        const addQty = line.qty;
-        const postQty = prevQty + addQty;
+      for (const line of receipt.lines) {
+        const { data: prodData, error: prodErr } = await supabase
+          .from('products')
+          .select('current_qty, cost_price')
+          .eq('id', line.product_id)
+          .single();
 
-        // Set new qty
-        updatedProducts[prodIdx] = {
-          ...updatedProducts[prodIdx],
-          current_qty: postQty
-        };
+        if (prodErr) throw prodErr;
 
-        // Create transaction log entry
-        newTxns.unshift({
-          id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        const prevQty = prodData ? Number(prodData.current_qty) || 0 : 0;
+        const costPrice = prodData ? Number(prodData.cost_price) || 0 : 0;
+        const postQty = prevQty + line.qty;
+
+        // 1. Update product balance
+        const success = await updateProduct(line.product_id, { current_qty: postQty });
+        if (!success) throw new Error(`Failed to update quantity for product: ${line.product_id}`);
+
+        // 2. Create transaction record
+        const txnSuccess = await addTransaction({
           company_id: receipt.company_id,
           product_id: line.product_id,
-          product_name: line.product_name,
-          sku: line.sku,
           action: 'stock_in',
           reference_no: receipt.receipt_no,
           warehouse_id: receipt.warehouse_id,
-          warehouse_name: receipt.warehouse_name,
           qty_before: prevQty,
-          qty_change: addQty,
+          qty_change: line.qty,
           qty_after: postQty,
-          value_change: addQty * (updatedProducts[prodIdx].cost_price || 0),
-          performed_by: 'u5',
-          performer_name: 'Charlie Stock',
-          notes: receipt.notes || `Stock receipt completion`,
-          created_at: new Date().toISOString()
+          value_change: line.qty * costPrice,
+          notes: receipt.notes || `Stock receipt completion`
         });
+        if (!txnSuccess) throw new Error(`Failed to create transaction for product: ${line.product_id}`);
 
-        // Add Batch entry if batch number provided
+        // 3. Create batch entry
         if (line.batch_no) {
-          newBatches.unshift({
+          const batchSuccess = await addBatch({
             id: `bl-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
             company_id: receipt.company_id,
             product_id: line.product_id,
-            product_name: line.product_name,
             batch_no: line.batch_no,
-            supplier_name: receipt.supplier_name,
             warehouse_id: receipt.warehouse_id,
             qty: line.qty,
             status: 'available',
             created_at: new Date().toISOString()
           });
+          if (!batchSuccess) throw new Error(`Failed to create batch for product: ${line.product_id}`);
         }
       }
-    });
 
-    // 2. Save Updated States
-    saveProducts(updatedProducts);
-    saveTransactions(newTxns);
-    saveBatches(newBatches);
+      // 4. Update status
+      const { error: rErr } = await supabase
+        .from('stock_receipts')
+        .update({ status: 'completed' })
+        .eq('id', id);
 
-    // Update receipt status
-    const updatedReceipts = receipts.map(r => {
-      if (r.id === id) return { ...r, status: 'completed' as const };
-      return r;
-    });
-    saveReceipts(updatedReceipts);
-    showToast(t('Stock-In Slip Completed! Inventory balances updated.'));
+      if (rErr) throw rErr;
+
+      showToast(t('Stock-In Slip Completed! Inventory balances updated.'));
+      fetchReceipts();
+    } catch (e) {
+      console.error('Error completing receipt:', e);
+      showToast(t('Error completing receipt.'));
+    }
   };
 
-  const handleCancel = (id: string) => {
-    const updated = receipts.map(r => {
-      if (r.id === id) return { ...r, status: 'cancelled' as const };
-      return r;
-    });
-    saveReceipts(updated);
-    showToast(t('Receipt slip cancelled.'));
+  const handleCancel = async (id: string) => {
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('stock_receipts')
+        .update({ status: 'cancelled' })
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast(t('Receipt slip cancelled.'));
+      fetchReceipts();
+    } catch (e) {
+      console.error(e);
+      showToast(t('Failed to cancel receipt.'));
+    }
   };
 
-  // Filter logic
-  const filteredReceipts = receipts.filter(r => {
-    const matchesSearch = r.receipt_no.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          (r.supplier_name && r.supplier_name.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesType = selectedType === 'All' || r.receipt_type === selectedType.toLowerCase();
-    return matchesSearch && matchesType;
-  });
+  const totalPages = Math.ceil(totalReceiptsCount / itemsPerPage);
 
   if (!mounted) return null;
 
@@ -266,7 +364,7 @@ export default function StockInModule() {
         
         {/* Toast alerts */}
         {toastMsg && (
-          <div className="fixed top-4 right-4 z-50 px-4 py-3 bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 rounded-lg shadow-xl font-bold border border-zinc-800 dark:border-zinc-200 animate-slide-up flex items-center gap-2">
+          <div className="fixed top-4 right-4 z-50 px-4 py-3 bg-zinc-950 dark:bg-white text-white dark:text-zinc-955 rounded-lg shadow-xl font-bold border border-zinc-800 dark:border-zinc-200 animate-slide-up flex items-center gap-2">
             <Info className="h-4 w-4 text-emerald-500" />
             <span>{toastMsg}</span>
           </div>
@@ -308,8 +406,11 @@ export default function StockInModule() {
             {['All', 'Purchase', 'Return', 'Production', 'Adjustment'].map((type) => (
               <button
                 key={type}
-                onClick={() => setSelectedType(type)}
-                className={`px-3 py-1.5 rounded-md font-bold transition-colors uppercase tracking-wider text-[9px] ${selectedType === type ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950' : 'bg-transparent text-zinc-500 hover:bg-zinc-200/40 dark:hover:bg-zinc-800'}`}
+                onClick={() => {
+                  setSelectedType(type);
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-md font-bold transition-colors uppercase tracking-wider text-[9px] ${selectedType === type ? 'bg-zinc-955 text-white dark:bg-white dark:text-zinc-950' : 'bg-transparent text-zinc-500 hover:bg-zinc-200/40 dark:hover:bg-zinc-800'}`}
               >
                 {t(type)}
               </button>
@@ -323,7 +424,10 @@ export default function StockInModule() {
               type="text"
               placeholder={t('Search by receipt code, vendor...')}
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-md pl-8 pr-3 py-1.5 outline-none text-zinc-850 dark:text-zinc-200"
             />
           </div>
@@ -348,14 +452,20 @@ export default function StockInModule() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200/40 dark:divide-zinc-850/40">
-                {filteredReceipts.length === 0 ? (
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={9} className="text-center py-10 text-zinc-450 bg-zinc-50/10 dark:bg-zinc-900/5 font-bold">
+                      {t('Loading...')}
+                    </td>
+                  </tr>
+                ) : receiptsList.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="text-center py-10 text-zinc-450 bg-zinc-50/10 dark:bg-zinc-900/5">
                       {t('No receipts found.')}
                     </td>
                   </tr>
                 ) : (
-                  filteredReceipts.map((r) => {
+                  receiptsList.map((r) => {
                     const isExpanded = expandedReceipt === r.id;
 
                     // Color code status badge
@@ -411,7 +521,7 @@ export default function StockInModule() {
                               {(r.status === 'draft' || r.status === 'approved') && (
                                 <button
                                   onClick={() => handleCancel(r.id)}
-                                  className="p-1 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 rounded"
+                                  className="p-1 hover:bg-red-50 dark:hover:bg-red-955/20 text-red-500 rounded"
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </button>
@@ -440,7 +550,7 @@ export default function StockInModule() {
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-zinc-150/40 dark:divide-zinc-850/30">
-                                      {r.lines.map((l) => (
+                                      {r.lines.map((l: any) => (
                                         <tr key={l.id}>
                                           <td className="py-2 px-3 font-mono font-bold text-zinc-800 dark:text-zinc-200">{l.sku}</td>
                                           <td className="py-2 px-3 text-zinc-700 dark:text-zinc-350">{l.product_name}</td>
@@ -470,6 +580,31 @@ export default function StockInModule() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination buttons */}
+          {!isLoading && totalPages > 1 && (
+            <div className="flex justify-between items-center px-4 py-3 bg-zinc-50/50 dark:bg-zinc-900/10 border-t border-zinc-200/50 dark:border-zinc-800">
+              <span className="text-zinc-450 font-medium">
+                {t('Showing page')} <strong>{currentPage}</strong> {t('of')} <strong>{totalPages}</strong> ({receiptsList.length} {t('receipts')})
+              </span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-650 dark:text-zinc-450 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  {t('Previous')}
+                </button>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1.5 rounded border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-650 dark:text-zinc-450 disabled:opacity-40 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  {t('Next')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Modal Form for Create */}
@@ -482,7 +617,7 @@ export default function StockInModule() {
                 <h3 className="text-sm font-black text-zinc-900 dark:text-zinc-50">
                   {t('New Goods Receipt Note (Draft)')}
                 </h3>
-                <button onClick={() => setCreateModalOpen(false)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded text-zinc-450">
+                <button onClick={() => setCreateModalOpen(false)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded text-zinc-450 cursor-pointer">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -543,7 +678,7 @@ export default function StockInModule() {
                       type="date"
                       value={formDate}
                       onChange={(e) => setFormDate(e.target.value)}
-                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none text-zinc-850 dark:text-zinc-200 font-mono"
+                      className="w-full bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-850 rounded px-2.5 py-1.5 outline-none text-zinc-855 dark:text-zinc-200 font-mono"
                     />
                   </div>
 
@@ -552,11 +687,11 @@ export default function StockInModule() {
                 {/* Line Items section */}
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
-                    <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">{t('Receipt Line Items')}</h4>
+                    <h4 className="text-[10px] font-bold text-zinc-400 dark:text-zinc-550 uppercase tracking-wider">{t('Receipt Line Items')}</h4>
                     <button
                       type="button"
                       onClick={addLineItem}
-                      className="px-2.5 py-1 text-[9px] bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 rounded font-bold border border-zinc-200/50 dark:border-zinc-850"
+                      className="px-2.5 py-1 text-[9px] bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 rounded font-bold border border-zinc-200/50 dark:border-zinc-850 cursor-pointer"
                     >
                       + {t('Add Material')}
                     </button>
@@ -566,11 +701,11 @@ export default function StockInModule() {
                     <table className="w-full text-left border-collapse text-[10px]">
                       <thead>
                         <tr className="bg-zinc-50 dark:bg-zinc-900 font-bold border-b border-zinc-200/60 dark:border-zinc-850 text-zinc-450 dark:text-zinc-500">
-                          <th className="py-2.5 px-3 w-[250px]">{t('Select Material SKU')}</th>
-                          <th className="py-2.5 px-3 w-[100px] font-mono">{t('Qty')}</th>
-                          <th className="py-2.5 px-3 w-[120px] font-mono">{t('Unit Cost ($)')}</th>
-                          <th className="py-2.5 px-3 w-[120px] font-mono text-right">{t('Amount ($)')}</th>
-                          <th className="py-2.5 px-3 w-[120px] font-mono">{t('Batch Lot No')}</th>
+                          <th className="py-2.5 px-3 w-[280px]">{t('Select Material SKU')}</th>
+                          <th className="py-2.5 px-3 w-[80px] font-mono">{t('Qty')}</th>
+                          <th className="py-2.5 px-3 w-[100px] font-mono">{t('Unit Cost ($)')}</th>
+                          <th className="py-2.5 px-3 w-[100px] font-mono text-right">{t('Amount ($)')}</th>
+                          <th className="py-2.5 px-3 w-[110px] font-mono">{t('Batch Lot No')}</th>
                           <th className="py-2.5 px-3">{t('Bin Location')}</th>
                           <th className="py-2.5 px-3 w-[40px]"></th>
                         </tr>
@@ -578,30 +713,26 @@ export default function StockInModule() {
                       <tbody className="divide-y divide-zinc-250/20 dark:divide-zinc-850/45">
                         {lineItems.map((item, idx) => (
                           <tr key={idx} className="bg-white dark:bg-zinc-955">
-                            <td className="py-2 px-3">
-                              <select
-                                required
-                                value={item.product_id}
-                                onChange={(e) => handleProductChange(idx, e.target.value)}
-                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none text-zinc-800 dark:text-zinc-200 font-bold"
-                              >
-                                <option value="">{t('Select Product...')}</option>
-                                {products.map(p => (
-                                  <option key={p.id} value={p.id}>[{p.sku}] {p.name}</option>
-                                ))}
-                              </select>
+                            <td className="py-2 px-3 align-middle">
+                              <ProductAutocomplete
+                                warehouseId={formWarehouseId || undefined}
+                                onSelect={(prod) => handleProductSelect(idx, prod)}
+                                excludeIds={lineItems.map(l => l.product_id).filter(id => id !== item.product_id)}
+                                placeholder={t('Search material by name, SKU...')}
+                                initialProductId={item.product_id || undefined}
+                              />
                             </td>
-                            <td className="py-2 px-3">
+                            <td className="py-2 px-3 align-middle">
                               <input
                                 type="number"
                                 required
                                 min="1"
                                 value={item.qty}
                                 onChange={(e) => handleQtyChange(idx, Number(e.target.value))}
-                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono"
+                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono text-[10px]"
                               />
                             </td>
-                            <td className="py-2 px-3">
+                            <td className="py-2 px-3 align-middle">
                               <input
                                 type="number"
                                 required
@@ -609,36 +740,36 @@ export default function StockInModule() {
                                 step="0.01"
                                 value={item.unit_price}
                                 onChange={(e) => handlePriceChange(idx, Number(e.target.value))}
-                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono"
+                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono text-[10px]"
                               />
                             </td>
-                            <td className="py-2 px-3 text-right font-mono font-bold text-zinc-800 dark:text-zinc-100">
+                            <td className="py-2 px-3 text-right font-mono font-bold text-zinc-800 dark:text-zinc-100 align-middle">
                               ${item.amount.toFixed(2)}
                             </td>
-                            <td className="py-2 px-3">
+                            <td className="py-2 px-3 align-middle">
                               <input
                                 type="text"
                                 placeholder="LOT-XXX"
                                 value={item.batch_no}
                                 onChange={(e) => handleLineFieldChange(idx, 'batch_no', e.target.value)}
-                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono"
+                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono text-[10px]"
                               />
                             </td>
-                            <td className="py-2 px-3">
+                            <td className="py-2 px-3 align-middle">
                               <input
                                 type="text"
                                 placeholder="A-01-01"
                                 value={item.location}
                                 onChange={(e) => handleLineFieldChange(idx, 'location', e.target.value)}
-                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono"
+                                className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded px-2 py-1 outline-none font-mono text-[10px]"
                               />
                             </td>
-                            <td className="py-2 px-3 text-center">
+                            <td className="py-2 px-3 text-center align-middle">
                               <button
                                 type="button"
                                 disabled={lineItems.length === 1}
                                 onClick={() => removeLineItem(idx)}
-                                className="text-red-500 disabled:opacity-30 hover:bg-red-50 dark:hover:bg-red-950/20 p-1 rounded"
+                                className="text-red-500 disabled:opacity-30 hover:bg-red-50 dark:hover:bg-red-950/20 p-1 rounded cursor-pointer"
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -659,7 +790,7 @@ export default function StockInModule() {
                       value={formNotes}
                       onChange={(e) => setFormNotes(e.target.value)}
                       placeholder={t('Enter references to Purchase Orders (PO), delivery logs, etc...')}
-                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none resize-none"
+                      className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-2 outline-none resize-none text-[10px]"
                     />
                   </div>
 
@@ -676,13 +807,13 @@ export default function StockInModule() {
                   <button
                     type="button"
                     onClick={() => setCreateModalOpen(false)}
-                    className="px-4 py-2 border border-zinc-250 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-lg text-zinc-650 dark:text-zinc-350 font-bold transition-colors"
+                    className="px-4 py-2 border border-zinc-250 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 rounded-lg text-zinc-650 dark:text-zinc-350 font-bold transition-colors cursor-pointer"
                   >
                     {t('Cancel')}
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 hover:opacity-95 rounded-lg font-bold transition-opacity"
+                    className="px-4 py-2 bg-zinc-950 dark:bg-white text-white dark:text-zinc-955 hover:opacity-95 rounded-lg font-bold transition-opacity cursor-pointer"
                   >
                     {t('Save Receipt Draft')}
                   </button>

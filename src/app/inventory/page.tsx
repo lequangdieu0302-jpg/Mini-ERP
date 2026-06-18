@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { PermissionGuard } from '@/components/permission-guard';
 import { useERP } from '@/context/erp-context';
 import { useWMSState } from '@/hooks/use-wms-state';
+import { createClient } from '@/utils/supabase/client';
 import Link from 'next/link';
 import {
   Package, Warehouse, TrendingUp, AlertTriangle, ArrowLeftRight,
@@ -18,77 +19,188 @@ export default function WMSDashboard() {
   }, []);
 
   const { t } = useERP();
-  const { products, warehouses, receipts, issues, transactions, batches, transfers, counts } = useWMSState();
+  const { warehouses } = useWMSState();
 
-  // 1. Calculate stats
-  const totalValue = products.reduce((sum, p) => sum + (p.cost_price * p.current_qty), 0);
-  const totalSKUs = products.length;
-  const lowStockProducts = products.filter(p => p.current_qty < p.min_qty);
-  const lowStockCount = lowStockProducts.length;
+  // Dashboard Stats
+  const [totalSKUs, setTotalSKUs] = useState(0);
+  const [totalValue, setTotalValue] = useState(0);
+  const [lowStockCount, setLowStockCount] = useState(0);
+  const [slowMovingCount, setSlowMovingCount] = useState(0);
+  const [receivedToday, setReceivedToday] = useState(0);
+  const [nearExpiryCount, setNearExpiryCount] = useState(0);
 
-  // Received today
-  const todayStr = new Date().toISOString().split('T')[0];
-  const receivedToday = receipts
-    .filter(r => r.date === todayStr || r.created_at.startsWith(todayStr))
-    .reduce((sum, r) => sum + r.lines.reduce((s, l) => s + l.qty, 0), 0);
+  // Exact database counts for quick cards
+  const [receiptsCount, setReceiptsCount] = useState(0);
+  const [issuesCount, setIssuesCount] = useState(0);
+  const [transfersCount, setTransfersCount] = useState(0);
+  const [countsCount, setCountsCount] = useState(0);
+  const [batchesCount, setBatchesCount] = useState(0);
 
-  // Slow moving (qty > max_qty)
-  const slowMovingCount = products.filter(p => p.max_qty && p.current_qty > p.max_qty).length;
+  // Dashboard Charts
+  const [stockInOutData, setStockInOutData] = useState<any[]>([]);
+  const [topIssued, setTopIssued] = useState<any[]>([]);
+  const [topValued, setTopValued] = useState<any[]>([]);
+  const [lowStockProducts, setLowStockProducts] = useState<any[]>([]);
+  const [transactionsList, setTransactionsList] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Near expiry (expiry_date within 90 days from 2026-06-15)
-  const referenceDate = new Date('2026-06-15');
-  const ninetyDaysLater = new Date('2026-09-13');
-  const nearExpiryCount = batches.filter(b => {
-    if (!b.expiry_date) return false;
-    const exp = new Date(b.expiry_date);
-    return exp >= referenceDate && exp <= ninetyDaysLater && b.status === 'available';
-  }).length;
+  const fetchDashboardData = async () => {
+    setIsLoading(true);
+    try {
+      const supabase = createClient();
 
-  // 2. Charts Calculations
-  // Chart A: Stock In vs Stock Out by Day (Last 7 Days)
-  // Let's generate last 7 days from 2026-06-15 backwards
-  const last7Days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(referenceDate);
-    d.setDate(d.getDate() - i);
-    return d.toISOString().split('T')[0];
-  }).reverse();
-
-  const stockInOutData = last7Days.map(date => {
-    // Receipts on this date
-    const inQty = receipts
-      .filter(r => r.date === date)
-      .reduce((sum, r) => sum + r.lines.reduce((s, l) => s + l.qty, 0), 0);
-    // Issues on this date
-    const outQty = issues
-      .filter(i => i.date === date)
-      .reduce((sum, i) => sum + i.lines.reduce((s, l) => s + l.qty_issued, 0), 0);
-    
-    // Display date formatted (e.g. "Jun 12")
-    const dateObj = new Date(date);
-    const dayLabel = dateObj.toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric' });
-    
-    return { dateLabel: dayLabel, inQty, outQty };
-  });
-
-  // Chart B: Top 10 most issued materials (Stock Out Qty)
-  const productIssueQtyMap: Record<string, { name: string; qty: number }> = {};
-  issues.forEach(iss => {
-    iss.lines.forEach(l => {
-      if (!productIssueQtyMap[l.product_id]) {
-        productIssueQtyMap[l.product_id] = { name: l.product_name || 'Material', qty: 0 };
+      // 1. Stats from aggregate view
+      const { data: statsData, error: statsErr } = await supabase
+        .from('inventory_dashboard_stats')
+        .select('*')
+        .single();
+      
+      if (!statsErr && statsData) {
+        setTotalSKUs(Number(statsData.total_skus) || 0);
+        setTotalValue(Number(statsData.total_value) || 0);
+        setLowStockCount(Number(statsData.low_stock_count) || 0);
+        setSlowMovingCount(Number(statsData.slow_moving_count) || 0);
+        setReceivedToday(Number(statsData.received_today) || 0);
       }
-      productIssueQtyMap[l.product_id].qty += l.qty_issued;
-    });
-  });
-  const topIssued = Object.values(productIssueQtyMap)
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 5); // display top 5 for neat layout
 
-  // Chart C: Top 10 highest stock value items (cost_price * current_qty)
-  const topValued = [...products]
-    .map(p => ({ name: p.name, value: p.cost_price * p.current_qty }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
+      // 2. Near expiry batches count (within 90 days from 2026-06-15)
+      const referenceDateStr = '2026-06-15';
+      const ninetyDaysLaterStr = '2026-09-13';
+      const { count: expCount, error: expErr } = await supabase
+        .from('batch_lots')
+        .select('*', { count: 'exact', head: true })
+        .gte('expiry_date', referenceDateStr)
+        .lte('expiry_date', ninetyDaysLaterStr)
+        .eq('status', 'available');
+
+      if (!expErr) {
+        setNearExpiryCount(expCount || 0);
+      }
+
+      // 3. Recent Receipts & Issues (last 7 days from 2026-06-15)
+      const startDateStr = '2026-06-08';
+      const endDateStr = '2026-06-15';
+
+      const { data: recsData } = await supabase
+        .from('stock_receipts')
+        .select('*, lines:stock_receipt_lines(*)')
+        .gte('date', startDateStr)
+        .lte('date', endDateStr);
+
+      const { data: issuesData } = await supabase
+        .from('stock_issues')
+        .select('*, lines:stock_issue_lines(*)')
+        .gte('date', startDateStr)
+        .lte('date', endDateStr);
+
+      const recentReceipts = recsData || [];
+      const recentIssues = issuesData || [];
+
+      // Calculate Stock In vs Stock Out by Day (Last 7 Days)
+      const referenceDate = new Date(endDateStr);
+      const last7Days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(referenceDate);
+        d.setDate(d.getDate() - i);
+        return d.toISOString().split('T')[0];
+      }).reverse();
+
+      const inOutData = last7Days.map(date => {
+        const inQty = recentReceipts
+          .filter(r => r.date === date)
+          .reduce((sum, r) => sum + r.lines.reduce((s: number, l: any) => s + l.qty, 0), 0);
+        const outQty = recentIssues
+          .filter(i => i.date === date)
+          .reduce((sum, i) => sum + i.lines.reduce((s: number, l: any) => s + l.qty_issued, 0), 0);
+        
+        const dateObj = new Date(date);
+        const dayLabel = dateObj.toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric' });
+        return { dateLabel: dayLabel, inQty, outQty };
+      });
+      setStockInOutData(inOutData);
+
+      // 4. Calculate Top Issued Materials
+      const productIssueQtyMap: Record<string, { name: string; qty: number }> = {};
+      recentIssues.forEach(iss => {
+        iss.lines.forEach((l: any) => {
+          if (!productIssueQtyMap[l.product_id]) {
+            productIssueQtyMap[l.product_id] = { name: l.product_name || 'Material', qty: 0 };
+          }
+          productIssueQtyMap[l.product_id].qty += Number(l.qty_issued) || 0;
+        });
+      });
+      const topIssuedList = Object.values(productIssueQtyMap)
+        .sort((a, b) => b.qty - a.qty)
+        .slice(0, 5);
+      setTopIssued(topIssuedList);
+
+      // 5. Fetch Top 10 High-Valued Items (approximated by quantity)
+      const { data: topProds } = await supabase
+        .from('products')
+        .select('name, current_qty, cost_price')
+        .order('current_qty', { ascending: false })
+        .limit(10);
+      
+      const topValuedList = (topProds || [])
+        .map(p => ({ name: p.name, value: p.cost_price * p.current_qty }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
+      setTopValued(topValuedList);
+
+      // 6. Fetch exact counts (head: true) for the quick access cards
+      const { count: recsCount } = await supabase.from('stock_receipts').select('*', { count: 'exact', head: true });
+      setReceiptsCount(recsCount || 0);
+
+      const { count: issCount } = await supabase.from('stock_issues').select('*', { count: 'exact', head: true });
+      setIssuesCount(issCount || 0);
+
+      const { count: trfsCount } = await supabase.from('stock_transfers').select('*', { count: 'exact', head: true });
+      setTransfersCount(trfsCount || 0);
+
+      const { count: cntsCount } = await supabase.from('stock_counts').select('*', { count: 'exact', head: true });
+      setCountsCount(cntsCount || 0);
+
+      const { count: batCount } = await supabase.from('batch_lots').select('*', { count: 'exact', head: true });
+      setBatchesCount(batCount || 0);
+
+      // 7. Fetch low stock products from view (limit 5 for dashboard)
+      const { data: lowStockData } = await supabase
+        .from('products_below_min_qty')
+        .select('*')
+        .limit(5);
+      setLowStockProducts(lowStockData || []);
+
+      // 8. Fetch recent 4 transactions for timeline
+      const { data: txData } = await supabase
+        .from('inventory_transactions')
+        .select('*, product:products(name, sku), warehouse:warehouses(name)')
+        .order('created_at', { ascending: false })
+        .limit(4);
+
+      const mappedTxns = (txData || []).map((t: any) => ({
+        id: t.id,
+        action: t.action,
+        reference_no: t.reference_no,
+        qty_change: Number(t.qty_change) || 0,
+        qty_after: Number(t.qty_after) || 0,
+        created_at: t.created_at,
+        product_name: t.product ? t.product.name : 'Unknown Product',
+        sku: t.product ? t.product.sku : '',
+        warehouse_name: t.warehouse ? t.warehouse.name : 'Depot'
+      }));
+      setTransactionsList(mappedTxns);
+
+    } catch (err) {
+      console.error('Error loading dashboard stats:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mounted) {
+      fetchDashboardData();
+    }
+  }, [mounted]);
 
   // Maximum values for chart percentage scaling
   const maxInOut = Math.max(...stockInOutData.map(d => Math.max(d.inQty, d.outQty)), 1);
@@ -136,27 +248,27 @@ export default function WMSDashboard() {
           <Link href="/inventory/stock-in" className="wms-nav-card group">
             <PackagePlus className="h-5 w-5 text-emerald-500 group-hover:scale-110 transition-transform" />
             <span className="font-bold mt-2">{t('Goods Receipt (Stock-In)')}</span>
-            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{receipts.length} slips</span>
+            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{receiptsCount} slips</span>
           </Link>
           <Link href="/inventory/stock-out" className="wms-nav-card group">
             <PackageMinus className="h-5 w-5 text-rose-500 group-hover:scale-110 transition-transform" />
             <span className="font-bold mt-2">{t('Goods Issue (Stock-Out)')}</span>
-            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{issues.length} slips</span>
+            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{issuesCount} slips</span>
           </Link>
           <Link href="/inventory/transfers" className="wms-nav-card group">
             <ArrowLeftRight className="h-5 w-5 text-amber-500 group-hover:scale-110 transition-transform" />
             <span className="font-bold mt-2">{t('Inter-Warehouse Transfer')}</span>
-            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{transfers.length} orders</span>
+            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{transfersCount} orders</span>
           </Link>
           <Link href="/inventory/stock-count" className="wms-nav-card group">
             <ClipboardList className="h-5 w-5 text-violet-500 group-hover:scale-110 transition-transform" />
             <span className="font-bold mt-2">{t('Inventory Audit Count')}</span>
-            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{counts.length} sheets</span>
+            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{countsCount} sheets</span>
           </Link>
           <Link href="/inventory/batch-serial" className="wms-nav-card group">
             <BadgeAlert className="h-5 w-5 text-sky-500 group-hover:scale-110 transition-transform" />
             <span className="font-bold mt-2">{t('Batch Lot & Serials')}</span>
-            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{batches.length} batches</span>
+            <span className="text-[9px] text-zinc-450 dark:text-zinc-550 font-mono mt-0.5">{batchesCount} batches</span>
           </Link>
         </div>
 
@@ -455,7 +567,7 @@ export default function WMSDashboard() {
             </div>
 
             <div className="space-y-4 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-[1.5px] before:bg-zinc-200 dark:before:bg-zinc-800">
-              {transactions.slice(0, 4).map((tx, idx) => {
+              {transactionsList.map((tx, idx) => {
                 let badgeColor = 'bg-zinc-100 text-zinc-650 dark:bg-zinc-900 dark:text-zinc-400';
                 if (tx.action === 'stock_in') badgeColor = 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-450';
                 else if (tx.action === 'stock_out') badgeColor = 'bg-rose-50 text-rose-600 dark:bg-rose-950/20 dark:text-rose-450';
