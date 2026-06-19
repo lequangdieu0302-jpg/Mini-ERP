@@ -385,77 +385,12 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .select('*')
           .eq('id', session.user.id)
           .single();
-
          if (profile) {
-          setCurrentUser(profile);
-          if (profile.current_company_id) {
-            setActiveCompanyId(profile.current_company_id);
-          }
-          
-          // Get role
-          const companyId = profile.current_company_id || 'c8b671a8-ff69-42b7-a37a-77c86f7881c1';
-          const { data: userComp } = await supabase
-            .from('user_companies')
-            .select('role')
-            .eq('user_id', session.user.id)
-            .eq('company_id', companyId)
-            .single();
-
-          if (userComp) {
-            setActiveRole(userComp.role as ERPUserRole);
-          } else {
-            // Auto-create user company mapping as Employee
-            const { error: insertRoleErr } = await supabase
-              .from('user_companies')
-              .insert({
-                user_id: session.user.id,
-                company_id: companyId,
-                role: 'Employee'
-              });
-            if (!insertRoleErr) {
-              setActiveRole('Employee');
-              const { data: ucData } = await supabase.from('user_companies').select('*');
-              if (ucData) setUserCompanies(ucData);
-            } else {
-              console.error("Error auto-creating user_companies mapping:", {
-                message: insertRoleErr.message,
-                code: insertRoleErr.code,
-                details: insertRoleErr.details,
-                hint: insertRoleErr.hint,
-              });
-            }
-          }
-
-          // Auto-create employee record if it doesn't exist for this company
-          const { data: existingEmp } = await supabase
-            .from('employees')
-            .select('id')
-            .eq('user_id', session.user.id)
-            .eq('company_id', companyId)
-            .maybeSingle();
-
-          if (!existingEmp) {
-            const { error: insertEmpErr } = await supabase.from('employees').insert({
-              company_id: companyId,
-              user_id: session.user.id,
-              position: 'Nhân viên',
-              hire_date: new Date().toISOString().split('T')[0],
-              active: true,
-            });
-            if (insertEmpErr) {
-              console.error("Error auto-creating employee record:", {
-                message: insertEmpErr.message,
-                code: insertEmpErr.code,
-                details: insertEmpErr.details,
-                hint: insertEmpErr.hint,
-              });
-            } else {
-              // Re-fetch employees list so the new record is available
-              const { data: empData } = await supabase.from('employees').select('*');
-              if (empData && empData.length > 0) setEmployees(empData);
-            }
-          }
-        }
+           setCurrentUser(profile);
+           if (profile.current_company_id) {
+             setActiveCompanyId(profile.current_company_id);
+           }
+         }
       } else {
         // Fallback user / reset if logged out
         setCurrentUser(EMPTY_USER);
@@ -533,10 +468,9 @@ export const ERPProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .from('employees')
           .select('id')
           .eq('user_id', session.user.id)
-          .eq('company_id', activeCompanyId)
-          .maybeSingle();
+          .eq('company_id', activeCompanyId);
 
-        if (!existingEmp) {
+        if (!existingEmp || existingEmp.length === 0) {
           const { error: insertEmpErr } = await supabase.from('employees').insert({
             company_id: activeCompanyId,
             user_id: session.user.id,
