@@ -135,6 +135,7 @@ export default function BarcodeScan() {
   // --- Tab 3: AI Template Counter States ---
   const [templateImage, setTemplateImage] = useState<string | null>(null);
   const [fullImage, setFullImage] = useState<string | null>(null);
+  const [threshold, setThreshold] = useState<number>(75);
   
   // Ledger Submit States
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -332,9 +333,8 @@ export default function BarcodeScan() {
   };
 
   // Run native Canvas color-similarity matching algorithm
-  const runTemplateMatchingAlgorithm = (fullImgUrl: string, sampleImgUrl: string) => {
+  const runTemplateMatchingAlgorithm = (fullImgUrl: string, sampleImgUrl: string, activeThreshold = threshold) => {
     setIsScanning(true);
-    setBoundingBoxes([]);
     playBeep();
 
     const fullImg = new window.Image();
@@ -367,9 +367,9 @@ export default function BarcodeScan() {
           const targetG = gSum / count;
           const targetB = bSum / count;
 
-          // 2. Sample full image into grid cells
-          const gridCols = 8;
-          const gridRows = 6;
+          // 2. Sample full image into grid cells (12x9 for high precision matching)
+          const gridCols = 12;
+          const gridRows = 9;
           canvas.width = gridCols;
           canvas.height = gridRows;
           ctx.drawImage(fullImg, 0, 0, gridCols, gridRows);
@@ -394,7 +394,7 @@ export default function BarcodeScan() {
               );
 
               // If color similarity is high enough
-              if (dist < 80) {
+              if (dist < activeThreshold) {
                 const cellW = 100 / gridCols;
                 const cellH = 100 / gridRows;
                 matchedBoxes.push({
@@ -410,27 +410,17 @@ export default function BarcodeScan() {
             }
           }
 
-          // Fallback if no matching cells detected
-          if (matchedBoxes.length === 0) {
-            const fallbackCount = Math.floor(Math.random() * 5) + 6;
-            for (let i = 0; i < fallbackCount; i++) {
-              matchedBoxes.push({
-                id: `match-fb-${Date.now()}-${i}`,
-                x: 20 + Math.random() * 50,
-                y: 20 + Math.random() * 50,
-                w: 12,
-                h: 12,
-                label: 'Match Unit',
-                conf: 0.86
-              });
-            }
+          // Use fallback preset boxes only for the demo
+          if (matchedBoxes.length === 0 && fullImgUrl === PRESET_TEMPLATE_MATCHES.fullUrl) {
+            setBoundingBoxes(PRESET_TEMPLATE_MATCHES.boxes);
+          } else {
+            setBoundingBoxes(matchedBoxes);
           }
 
           setTimeout(() => {
             setIsScanning(false);
-            setBoundingBoxes(matchedBoxes);
             playChime();
-          }, 1800);
+          }, 800);
 
         } catch (e) {
           console.error("Match error:", e);
@@ -785,13 +775,22 @@ export default function BarcodeScan() {
                   </h3>
                   
                   {capturedImage && (
-                    <button
-                      onClick={() => { setCapturedImage(null); setBoundingBoxes([]); }}
-                      className="text-[10px] font-bold text-rose-500 hover:underline flex items-center gap-1"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      {t('Reset Analysis')}
-                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => { setCapturedImage(null); setBoundingBoxes([]); }}
+                        className="text-[10px] font-bold text-rose-500 hover:underline flex items-center gap-1"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        {t('Reset Analysis')}
+                      </button>
+                      <button
+                        onClick={() => { setBoundingBoxes([]); playBeep(); }}
+                        className="text-[10px] font-bold text-amber-500 hover:underline flex items-center gap-1"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        {t('Xóa tất cả khung')}
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -1001,12 +1000,22 @@ export default function BarcodeScan() {
                   </h3>
                   
                   {(templateImage || fullImage) && (
-                    <button
-                      onClick={() => { setTemplateImage(null); setFullImage(null); setBoundingBoxes([]); }}
-                      className="text-[10px] font-bold text-rose-500 hover:underline"
-                    >
-                      {t('Reset Matching Workspace')}
-                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => { setTemplateImage(null); setFullImage(null); setBoundingBoxes([]); }}
+                        className="text-[10px] font-bold text-rose-500 hover:underline flex items-center gap-1"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        {t('Reset Matching Workspace')}
+                      </button>
+                      <button
+                        onClick={() => { setBoundingBoxes([]); playBeep(); }}
+                        className="text-[10px] font-bold text-amber-500 hover:underline flex items-center gap-1"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        {t('Xóa tất cả khung')}
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -1199,6 +1208,33 @@ export default function BarcodeScan() {
                     </div>
                   )}
                 </div>
+
+                {/* AI Threshold Slider */}
+                {fullImage && templateImage && !isScanning && (
+                  <div className="bg-zinc-50/70 dark:bg-zinc-900/30 p-3 rounded-xl border border-zinc-200/50 dark:border-zinc-850 space-y-2">
+                    <div className="flex justify-between text-[9px] font-bold text-zinc-400 uppercase tracking-wider">
+                      <span>{t('Độ nhạy AI (Sensitivity)')}</span>
+                      <span className="font-mono text-indigo-500 font-bold">{threshold}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="25" 
+                      max="160" 
+                      value={threshold} 
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setThreshold(val);
+                        if (fullImage && templateImage) {
+                          runTemplateMatchingAlgorithm(fullImage, templateImage, val);
+                        }
+                      }}
+                      className="w-full h-1 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                    <p className="text-[8px] text-zinc-450 leading-tight">
+                      {t('💡 Kéo qua trái để lọc kỹ hơn, kéo qua phải để nhận diện thêm nhiều vùng tương đồng màu.')}
+                    </p>
+                  </div>
+                )}
 
                 {submitSuccess ? (
                   <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 rounded-xl p-5 text-center space-y-2 animate-scale-up">
