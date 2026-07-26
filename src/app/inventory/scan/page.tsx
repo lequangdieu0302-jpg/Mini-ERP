@@ -351,10 +351,17 @@ export default function BarcodeScan() {
           const ctx = canvas.getContext('2d');
           if (!ctx) return;
 
-          // 1. Extract sample average color
+          // 1. Extract sample average color (Cropping only the center 60% of the sample image to avoid background frame!)
           canvas.width = 16;
           canvas.height = 16;
-          ctx.drawImage(sampleImg, 0, 0, 16, 16);
+          const sW = sampleImg.naturalWidth || sampleImg.width || 100;
+          const sH = sampleImg.naturalHeight || sampleImg.height || 100;
+          const cropX = sW * 0.2;
+          const cropY = sH * 0.2;
+          const cropW = sW * 0.6;
+          const cropH = sH * 0.6;
+          ctx.drawImage(sampleImg, cropX, cropY, cropW, cropH, 0, 0, 16, 16);
+          
           const sampleData = ctx.getImageData(0, 0, 16, 16).data;
           let rSum = 0, gSum = 0, bSum = 0, count = 0;
           for (let i = 0; i < sampleData.length; i += 4) {
@@ -367,7 +374,32 @@ export default function BarcodeScan() {
           const targetG = gSum / count;
           const targetB = bSum / count;
 
-          // 2. Sample full image into grid cells (12x9 for high precision matching)
+          // 2. Estimate background color from corners of the full image (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = 32;
+          tempCanvas.height = 32;
+          const tempCtx = tempCanvas.getContext('2d');
+          let bgR = 128, bgG = 128, bgB = 128; // Default grey fallback
+          if (tempCtx) {
+            tempCtx.drawImage(fullImg, 0, 0, 32, 32);
+            const corners = [
+              tempCtx.getImageData(0, 0, 1, 1).data,
+              tempCtx.getImageData(31, 0, 1, 1).data,
+              tempCtx.getImageData(0, 31, 1, 1).data,
+              tempCtx.getImageData(31, 31, 1, 1).data
+            ];
+            let rBgSum = 0, gBgSum = 0, bBgSum = 0;
+            corners.forEach(c => {
+              rBgSum += c[0];
+              gBgSum += c[1];
+              bBgSum += c[2];
+            });
+            bgR = rBgSum / 4;
+            bgG = gBgSum / 4;
+            bgB = bBgSum / 4;
+          }
+
+          // 3. Sample full image into grid cells (12x9 for high precision matching)
           const gridCols = 12;
           const gridRows = 9;
           canvas.width = gridCols;
@@ -378,7 +410,7 @@ export default function BarcodeScan() {
           const matchedBoxes: BBox[] = [];
           let matchId = 0;
 
-          // 3. Scan cells and compute color distance
+          // 4. Scan cells and compute color distance
           for (let r = 0; r < gridRows; r++) {
             for (let c = 0; c < gridCols; c++) {
               const idx = (r * gridCols + c) * 4;
@@ -386,15 +418,22 @@ export default function BarcodeScan() {
               const cellG = fullData[idx+1];
               const cellB = fullData[idx+2];
 
-              // Euclidean color distance
-              const dist = Math.sqrt(
+              // Euclidean color distance to target sample
+              const distToSample = Math.sqrt(
                 Math.pow(cellR - targetR, 2) + 
                 Math.pow(cellG - targetG, 2) + 
                 Math.pow(cellB - targetB, 2)
               );
 
-              // If color similarity is high enough
-              if (dist < activeThreshold) {
+              // Euclidean color distance to background
+              const distToBg = Math.sqrt(
+                Math.pow(cellR - bgR, 2) + 
+                Math.pow(cellG - bgG, 2) + 
+                Math.pow(cellB - bgB, 2)
+              );
+
+              // If color similarity is high enough, AND color is closer to the sample than to the background
+              if (distToSample < activeThreshold && distToSample < (distToBg + 20)) {
                 const cellW = 100 / gridCols;
                 const cellH = 100 / gridRows;
                 matchedBoxes.push({
@@ -404,7 +443,7 @@ export default function BarcodeScan() {
                   w: Math.round(cellW * 0.8),
                   h: Math.round(cellH * 0.8),
                   label: 'Match Unit',
-                  conf: Number((1 - dist / 441.67).toFixed(2))
+                  conf: Number((1 - distToSample / 441.67).toFixed(2))
                 });
               }
             }
