@@ -1150,31 +1150,25 @@ export default function BarcodeScan() {
                   )}
                 </div>
 
-                {/* AI Threshold Slider */}
-                {fullImage && templateImage && !isScanning && (
-                  <div className="bg-zinc-50/70 dark:bg-zinc-900/30 p-3 rounded-xl border border-zinc-200/50 dark:border-zinc-850 space-y-2">
-                    <div className="flex justify-between text-[9px] font-bold text-zinc-400 uppercase tracking-wider">
-                      <span>{t('Độ nhạy AI (Sensitivity)')}</span>
-                      <span className="font-mono text-indigo-500 font-bold">{threshold}</span>
-                    </div>
-                    <input 
-                      type="range" 
-                      min="25" 
-                      max="160" 
-                      value={threshold} 
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setThreshold(val);
-                        if (fullImage && templateImage) {
-                          runTemplateMatchingAlgorithm(fullImage, templateImage, val);
-                        }
-                      }}
-                      className="w-full h-1 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                    />
-                    <p className="text-[8px] text-zinc-450 leading-tight">
-                      {t('💡 Kéo qua trái để lọc kỹ hơn, kéo qua phải để nhận diện thêm nhiều vùng tương đồng màu.')}
-                    </p>
-                  </div>
+                {/* Analyze Button */}
+                {fullImage && templateImage && (
+                  <button
+                    onClick={() => runTemplateMatchingAlgorithm(fullImage, templateImage)}
+                    disabled={isScanning}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white transition-all shadow-lg shadow-emerald-900/20"
+                  >
+                    {isScanning ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        {t('AI đang phân tích...')}
+                      </>
+                    ) : (
+                      <>
+                        <Cpu className="h-4 w-4" />
+                        {t('Phân Tích AI')}
+                      </>
+                    )}
+                  </button>
                 )}
 
                 {submitSuccess ? (
