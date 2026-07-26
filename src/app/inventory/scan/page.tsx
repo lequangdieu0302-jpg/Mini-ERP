@@ -137,6 +137,11 @@ export default function BarcodeScan() {
   const [fullImage, setFullImage] = useState<string | null>(null);
   const [threshold, setThreshold] = useState<number>(75);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [geminiKey, setGeminiKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('gemini_api_key') ?? '';
+    return '';
+  });
+  const [showKeyInput, setShowKeyInput] = useState(false);
   
   // Ledger Submit States
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -333,58 +338,84 @@ export default function BarcodeScan() {
     }
   };
 
-  // Run AI Vision matching via Gemini API
+  // Run AI Vision matching — calls Gemini directly from browser using user-supplied key
   const runTemplateMatchingAlgorithm = async (fullImgUrl: string, sampleImgUrl: string, activeThreshold = threshold) => {
+    const key = geminiKey.trim();
+    if (!key) {
+      setShowKeyInput(true);
+      setAiError('Vui lòng nhập Gemini API Key để sử dụng tính năng này.');
+      return;
+    }
+
     setIsScanning(true);
     setAiError(null);
     setBoundingBoxes([]);
     playBeep();
 
+    const extractBase64 = (dataUrl: string) => {
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) throw new Error('Invalid image format');
+      return { mimeType: match[1], data: match[2] };
+    };
+
+    const prompt = `Nhiem vu cua ban la xac dinh va dem so luong san pham trong anh toan canh dua tren anh mau.\n\nInput:\n- Image 1 (dau tien): anh mau cua mot san pham.\n- Image 2 (thu hai): anh toan canh chua nhieu san pham.\n\nQuy trinh:\n1. Phan tich Image 1: xac dinh chinh xac object can tim, ghi nho hinh dang, mau sac, hoa van, logo, kich thuoc tuong doi, huong dat.\n2. Phan tich Image 2: quet toan bo anh, chi danh dau object giong Image 1. Chap nhan xoay, nghieng, che khuat duoi 30%.\n3. Kiem tra lai, khong dem hai lan cung mot object. Bo qua neu confidence < 0.7.\n4. Toa do x,y,width,height la PHAN TRAM (0-100) so voi kich thuoc anh toan canh.\n\nQUAN TRONG: Chi tra ve JSON thuan tuy.\nFormat: {"count":5,"objects":[{"x":10,"y":20,"width":15,"height":12,"confidence":0.93}]}`;
+
+    const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
+    let lastError = '';
+
     try {
-      const response = await fetch('/api/count-objects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          templateImage: sampleImgUrl,
-          fullImage: fullImgUrl,
-        }),
+      const sample = extractBase64(sampleImgUrl);
+      const full = extractBase64(fullImgUrl);
+
+      const body = JSON.stringify({
+        contents: [{ parts: [
+          { inline_data: { mime_type: sample.mimeType, data: sample.data } },
+          { inline_data: { mime_type: full.mimeType, data: full.data } },
+          { text: prompt }
+        ]}],
+        generationConfig: { temperature: 0.1, topP: 0.8, maxOutputTokens: 4096, responseMimeType: 'application/json' }
       });
 
-      const result = await response.json();
-      console.log('[AI Count] response status:', response.status, 'body:', JSON.stringify(result));
+      for (const model of MODELS) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        const json = await res.json();
 
-      if (!response.ok) {
-        setAiError(`Lỗi ${response.status}: ${result?.error ?? 'Unknown error'}`);
+        if (res.status === 429) {
+          lastError = `${model} hết quota`;
+          continue;
+        }
+        if (!res.ok) {
+          setAiError(`Lỗi ${res.status} (${model}): ${json?.error?.message?.slice(0, 150) ?? 'Unknown'}`);
+          return;
+        }
+        if (json.error) {
+          setAiError(json.error.message?.slice(0, 200) ?? JSON.stringify(json.error));
+          return;
+        }
+
+        const rawText = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        const cleaned = rawText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        const objects: Array<{ x: number; y: number; width: number; height: number; confidence: number }> = parsed.objects ?? [];
+
+        if (objects.length === 0) {
+          setAiError('AI không tìm thấy vật thể nào giống ảnh mẫu (confidence < 0.7). Thử ảnh rõ hơn.');
+          return;
+        }
+
+        setBoundingBoxes(objects.map((obj, i) => ({
+          id: `ai-${Date.now()}-${i}`,
+          x: obj.x, y: obj.y, w: obj.width, h: obj.height,
+          label: 'Match', conf: obj.confidence
+        })));
+        playChime();
         return;
       }
 
-      if (result.error) {
-        setAiError(result.error);
-        return;
-      }
-
-      const objects: Array<{ x: number; y: number; width: number; height: number; confidence: number }> = result.objects ?? [];
-
-      if (objects.length === 0) {
-        setAiError('AI không tìm thấy vật thể nào giống ảnh mẫu (confidence < 0.7). Thử ảnh rõ hơn hoặc ảnh mẫu chụp gần hơn.');
-        return;
-      }
-
-      const matchedBoxes: BBox[] = objects.map((obj, i) => ({
-        id: `ai-match-${Date.now()}-${i}`,
-        x: obj.x,
-        y: obj.y,
-        w: obj.width,
-        h: obj.height,
-        label: 'Match Unit',
-        conf: obj.confidence,
-      }));
-
-      setBoundingBoxes(matchedBoxes);
-      playChime();
+      setAiError(`Tất cả model hết quota free tier (${lastError}). Tạo API key mới từ Google account khác tại aistudio.google.com/apikey`);
     } catch (e) {
-      console.error('Template match error:', e);
-      setAiError(`Lỗi kết nối: ${String(e)}`);
+      setAiError(`Lỗi: ${String(e)}`);
     } finally {
       setIsScanning(false);
     }
@@ -1162,6 +1193,53 @@ export default function BarcodeScan() {
                       <span className="text-[10px] text-zinc-500 dark:text-zinc-455 ml-1 font-bold">{t('vật tư')}</span>
                     </div>
                   )}
+                </div>
+
+                {/* Gemini API Key Input */}
+                <div className="bg-zinc-50 dark:bg-zinc-900/40 p-3 rounded-xl border border-zinc-200/50 dark:border-zinc-850 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                      <Cpu className="h-3 w-3" /> Gemini API Key
+                    </span>
+                    {geminiKey && (
+                      <span className="text-[8px] font-bold text-emerald-500 flex items-center gap-0.5">
+                        <Check className="h-2.5 w-2.5" /> Đã lưu
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-1">
+                    <input
+                      type="password"
+                      placeholder="Paste Gemini API Key..."
+                      value={geminiKey}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setGeminiKey(val);
+                        if (typeof window !== 'undefined') {
+                          if (val) localStorage.setItem('gemini_api_key', val);
+                          else localStorage.removeItem('gemini_api_key');
+                        }
+                        if (val) { setAiError(null); setShowKeyInput(false); }
+                      }}
+                      className="flex-1 text-[10px] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 outline-none font-mono min-w-0"
+                    />
+                    {geminiKey && (
+                      <button
+                        onClick={() => {
+                          setGeminiKey('');
+                          if (typeof window !== 'undefined') localStorage.removeItem('gemini_api_key');
+                        }}
+                        className="px-2 py-1 rounded-lg bg-zinc-200 dark:bg-zinc-800 hover:bg-rose-100 dark:hover:bg-rose-950/40 text-zinc-500 hover:text-rose-500 text-[9px] font-bold transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[8px] text-zinc-400 leading-snug">
+                    Lấy key miễn phí tại{' '}
+                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-indigo-500 underline">aistudio.google.com/apikey</a>
+                    {' '}→ Create API key in new project. Key được lưu trong máy bạn, không gửi đi đâu.
+                  </p>
                 </div>
 
                 {/* Analyze Button */}
