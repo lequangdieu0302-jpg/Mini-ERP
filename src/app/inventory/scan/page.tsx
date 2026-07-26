@@ -136,6 +136,7 @@ export default function BarcodeScan() {
   const [templateImage, setTemplateImage] = useState<string | null>(null);
   const [fullImage, setFullImage] = useState<string | null>(null);
   const [threshold, setThreshold] = useState<number>(75);
+  const [aiError, setAiError] = useState<string | null>(null);
   
   // Ledger Submit States
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -335,6 +336,8 @@ export default function BarcodeScan() {
   // Run AI Vision matching via Gemini API
   const runTemplateMatchingAlgorithm = async (fullImgUrl: string, sampleImgUrl: string, activeThreshold = threshold) => {
     setIsScanning(true);
+    setAiError(null);
+    setBoundingBoxes([]);
     playBeep();
 
     try {
@@ -347,15 +350,25 @@ export default function BarcodeScan() {
         }),
       });
 
+      const result = await response.json();
+      console.log('[AI Count] response status:', response.status, 'body:', JSON.stringify(result));
+
       if (!response.ok) {
-        const err = await response.json();
-        console.error('AI count error:', err);
-        setIsScanning(false);
+        setAiError(`Lỗi ${response.status}: ${result?.error ?? 'Unknown error'}`);
         return;
       }
 
-      const result = await response.json();
+      if (result.error) {
+        setAiError(result.error);
+        return;
+      }
+
       const objects: Array<{ x: number; y: number; width: number; height: number; confidence: number }> = result.objects ?? [];
+
+      if (objects.length === 0) {
+        setAiError('AI không tìm thấy vật thể nào giống ảnh mẫu (confidence < 0.7). Thử ảnh rõ hơn hoặc ảnh mẫu chụp gần hơn.');
+        return;
+      }
 
       const matchedBoxes: BBox[] = objects.map((obj, i) => ({
         id: `ai-match-${Date.now()}-${i}`,
@@ -371,6 +384,7 @@ export default function BarcodeScan() {
       playChime();
     } catch (e) {
       console.error('Template match error:', e);
+      setAiError(`Lỗi kết nối: ${String(e)}`);
     } finally {
       setIsScanning(false);
     }
@@ -1169,6 +1183,16 @@ export default function BarcodeScan() {
                       </>
                     )}
                   </button>
+                )}
+
+                {/* AI Error Display */}
+                {aiError && !isScanning && (
+                  <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-xl p-3 space-y-1">
+                    <p className="text-[10px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3 shrink-0" /> Lỗi phân tích
+                    </p>
+                    <p className="text-[9px] text-rose-500 dark:text-rose-400 leading-snug break-all">{aiError}</p>
+                  </div>
                 )}
 
                 {submitSuccess ? (
